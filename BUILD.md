@@ -4,9 +4,10 @@ Step-by-step instructions for building Logos from the architecture spec. Read `A
 
 ## Before you start
 
-You need one thing before writing any code:
+Ask the user for:
 
-- **Primary channel** — Which messaging platform do you want to connect first? (Telegram, WhatsApp, Discord, Slack, etc.)
+- **Primary channel** (required) — Which messaging platform? (Telegram, WhatsApp, Discord, Slack, etc.)
+- **AI model** (optional) — Which model to use. Defaults to the latest Claude Sonnet if not specified.
 
 Don't worry about the assistant's name or personality — those are configured on first run through the messaging channel itself. Leave `SOUL.md` as-is.
 
