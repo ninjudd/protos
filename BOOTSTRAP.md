@@ -106,10 +106,11 @@ The heartbeat is just a cron job (`*/30 * * * *`) — no special implementation 
 
 The entry point:
 
-1. Initializes the database
-2. Registers channels
-3. Starts the scheduler
-4. Logs that it's running
+1. Validates required environment variables — at minimum the AI provider API key. If anything is missing, print a clear error message and exit. Don't silently start with missing credentials.
+2. Initializes the database
+3. Registers channels
+4. Starts the scheduler
+5. Logs that it's running
 
 That's it. No HTTP server needed unless a channel requires a webhook.
 

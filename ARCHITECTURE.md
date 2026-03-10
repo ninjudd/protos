@@ -143,11 +143,12 @@ The typical flow: the agent edits a file, sends a message explaining what it cha
 
 ## Startup flow
 
-1. Initialize SQLite database (create tables if they don't exist)
-2. Discover skills (scan `skills/` for `SKILL.md` files, load names and descriptions)
-3. Register channels (each channel checks for its credentials and connects if present)
-4. Start the scheduler (load cron jobs from `cron/config.yaml`)
-5. Begin processing incoming messages
+1. Validate required environment variables (exit with a clear error if missing)
+2. Initialize SQLite database (create tables if they don't exist)
+3. Discover skills (scan `skills/` for `SKILL.md` files, load names and descriptions)
+4. Register channels (each channel checks for its credentials and connects if present)
+5. Start the scheduler (load cron jobs from `cron/config.yaml`)
+6. Begin processing incoming messages
 
 ## File structure
 
