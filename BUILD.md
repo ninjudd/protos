@@ -46,6 +46,7 @@ Channel-specific variables (including the owner's ID on that platform) are liste
 - Keep configuration minimal
 - Install packages with `npm install` rather than writing `package.json` by hand — this ensures you get the latest versions
 - Source code lives in `src/`. Everything else at the root is markdown, YAML, and data.
+- Use `process.cwd()` for the project root path, not `import.meta.dirname` — tsx runs in CJS mode where `import.meta.dirname` is undefined.
 - Create a `.env` file at the project root with the API key for the chosen provider, `AI_MODEL`, `PRIMARY_CHANNEL`, and any channel-specific variables (including the owner ID — see the recipe). Leave secrets blank for the user to fill in.
 
 ### 2. Set up the database
