@@ -123,7 +123,7 @@ Create a simple bash script at the project root called `logos` that supports:
 - `./logos restart` — restart it
 - `./logos status` — check if it's running
 
-Run the process with `tsx src/index.ts` (not compiled JS). This way the agent can modify its own TypeScript source and restart to apply changes — no build step needed.
+Run the process with `npx tsx src/index.ts` (not compiled JS). This way the agent can modify its own TypeScript source and restart to apply changes — no build step needed.
 
 On restart, run `tsc --noEmit` first to type-check the code. If it fails, abort the restart and keep the old process running. This prevents the agent from killing itself with a bad edit.
 
