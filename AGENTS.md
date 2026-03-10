@@ -20,12 +20,11 @@ Read `SOUL.md` first, every time you wake. That file defines who you are — you
 
 - **remember** — store a fact for later recall
 - **recall** — retrieve relevant memories
-- **schedule** — create a recurring task
 - **shell** — run a shell command on the host (use responsibly)
 
 ## Conversations
 
-Each conversation may have a custom system prompt stored in the database. Use it when present. Otherwise, fall back to your default behavior described here.
+Each conversation may have a custom context file in `conversations/`. Use it when present. Otherwise, fall back to your default behavior described here.
 
 ## Security
 

@@ -10,10 +10,12 @@ You need three things before writing any code. The user may provide them inline 
 2. **Primary channel** — Which messaging platform do you want to connect first? (Telegram, WhatsApp, Discord, Slack, etc.)
 3. **Personality** — Describe your assistant's personality and tone. (casual, formal, terse, witty, etc.) Use the answers to populate `SOUL.md`.
 
+The chosen name should be set as `ASSISTANT_NAME` in `.env`. The code should read it from there rather than hardcoding it.
+
 ## Key packages
 
+- `@anthropic-ai/agent-sdk` — **Claude Agent SDK** (not the raw `@anthropic-ai/sdk`). This SDK provides an `Agent` class with built-in tool execution and agentic loops. Do not manually implement a tool loop.
 - `better-sqlite3` — SQLite driver
-- `@anthropic-ai/agent-sdk` — Claude Agent SDK
 - `js-yaml` — YAML parsing for `cron.yaml`
 - `node-cron` — cron expression scheduling
 - `dotenv` — load environment variables from `.env`
@@ -26,6 +28,8 @@ All secrets (API keys, bot tokens) go in `.env` at the project root. This file i
 At minimum:
 
 - `ANTHROPIC_API_KEY` — required for the Claude Agent SDK
+- `CLAUDE_MODEL` — model to use (default: `claude-sonnet-4-20250514`)
+- `ASSISTANT_NAME` — your assistant's name (default: `Logos`)
 
 Channel-specific variables are listed in each recipe.
 
@@ -59,15 +63,12 @@ The router:
 
 ### 4. Build the agent (`src/agent.ts`)
 
-Wrap the Claude Agent SDK:
+Use the Claude Agent SDK's `Agent` class — do not manually implement a tool loop. The SDK handles tool execution, retries, and conversation flow natively.
 
-- Accept a message and conversation history
-- Load `SOUL.md` first — this is the agent's identity
-- Load `memory.md` for long-term context
-- Load the conversation's context file from `conversations/` if one exists
-- Build a system prompt from these sources
-- Invoke the agent with tools
-- Return the response text
+- Create an `Agent` instance with tools and a system prompt
+- The system prompt is assembled from: `SOUL.md` (identity) + `memory.md` (long-term context) + the conversation's file from `conversations/` if one exists
+- Read the model from `process.env.CLAUDE_MODEL` with a sensible default
+- Pass the message and conversation history, let the SDK handle the rest
 
 Start with a minimal set of tools:
 

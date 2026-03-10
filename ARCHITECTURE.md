@@ -83,7 +83,7 @@ The agent is the brain. It uses the Anthropic Claude Agent SDK to:
 - Decide how to respond, optionally using tools
 - Return a response
 
-**Tools** are capabilities the agent can use: reading files, running shell commands, searching the web, etc. The Claude Agent SDK handles tool execution natively.
+**Tools** are capabilities the agent can use: reading files, running shell commands, searching the web, etc. The Claude Agent SDK's `Agent` class handles tool execution and agentic loops natively — do not reimplement this.
 
 **Per-conversation context:** Each conversation gets its own system prompt and history. A conversation with your family group chat behaves differently than a 1:1 with your work colleague because the context is different.
 
