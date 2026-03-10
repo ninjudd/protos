@@ -87,8 +87,8 @@ Skills are markdown instruction files in `skills/` that follow the [Agent Skills
 
 - Scan the `src/channels/` directory for channel files
 - Call each channel's `register()` function with the router
-- Channels that lack credentials simply don't activate
-- Return the number of channels that registered. If zero, the process should exit with a clear error — there's nothing to connect to.
+- A channel's `register()` should return a boolean — `true` if it connected, `false` if credentials were missing and it skipped
+- Count the channels that actually connected. If zero, the process should exit with a clear error — there's nothing to connect to.
 
 ### 6. Build the user's chosen channel
 
