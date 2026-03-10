@@ -6,14 +6,14 @@ A blueprint for personal AI assistants that build themselves.
 
 [OpenClaw](https://github.com/openclaw/openclaw) demonstrates that local AI assistants are incredibly useful. But it is also a large and complex system.
 
-Logos explores the opposite extreme: a minimal assistant architecture built from readable files. It's an architecture specification — a set of documents precise enough that an AI coding agent can read them and generate a working personal assistant from scratch.
+Logos explores the opposite extreme. It lets you build a powerful assistant that is:
 
-Your assistant should be:
-
-- **local-first**
-- **owned by you**
 - **simple enough to understand**
 - **built from readable files**
+- **local-first**
+- **entirely yours**
+
+Logos is an architecture specification — a set of documents precise enough that an AI coding agent can read them and generate a working personal assistant from scratch.
 
 ## How it works
 
