@@ -36,7 +36,7 @@ Channel-specific variables are listed in each recipe.
 
 ## Step-by-step
 
-**Note:** Files like `cron.yaml`, `cron/consolidate-memories.md`, `heartbeat.md`, and `memory.md` already exist with sensible defaults. Don't overwrite them — just use them as-is.
+**Note:** Files like `cron.yaml`, `cron/*.md`, `heartbeat.md`, and `memory.md` already exist with sensible defaults. Don't overwrite them — just use them as-is.
 
 ### 1. Initialize the project
 
