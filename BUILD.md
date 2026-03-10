@@ -19,6 +19,7 @@ Don't worry about the assistant's name or personality — those are configured o
 - `js-yaml` — YAML parsing for cron config and skill frontmatter
 - `node-cron` — cron expression scheduling
 - `tsx` — TypeScript execution without a build step. The agent can modify its own source and restart to apply changes.
+- `zod` — schema validation, required by the AI SDK for tool parameter definitions
 - `dotenv` — load environment variables from `.env`
 - Channel-specific libraries — see the chosen recipe in `recipes/`
 
@@ -52,7 +53,7 @@ SQLite stores **messages only**. Create a single table:
 
 - **messages** — channelId, conversationId, role (`user` or `assistant`), text, timestamp
 
-Store the database file in `data/chat.sqlite`. Don't open the database connection at import time — initialize it in a function that `index.ts` calls at startup. Export functions for storing and retrieving messages and conversation history.
+Store the database file in `data/chat.sqlite`. Create the `data/` directory if it doesn't exist. Don't open the database connection at import time — initialize it in a function that `index.ts` calls at startup. Export functions for storing and retrieving messages and conversation history.
 
 Everything else (memory, skills, cron) lives on the filesystem — see `ARCHITECTURE.md` for details.
 
@@ -73,7 +74,7 @@ Use the Vercel AI SDK's `generateText` for automatic tool execution. Limit the n
 - Use the `@ai-sdk/anthropic` provider by default
 - Read the model from the `AI_MODEL` environment variable with a sensible default
 - The system prompt is assembled from: `SOUL.md` (identity) + `memory.md` (long-term context) + a summary of available skills (names and descriptions from `skills/*/SKILL.md` frontmatter)
-- The agent receives conversation history (the current message is already the last entry). Pass it directly to the SDK as the messages array.
+- The agent receives conversation history (the current message is already the last entry). Pass it directly to the SDK as the messages array. Cap history at 50 messages to avoid blowing past token limits.
 
 Start with a minimal set of tools:
 

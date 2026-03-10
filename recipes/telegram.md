@@ -19,8 +19,13 @@
 
 Only forward messages where the chat ID matches `TELEGRAM_OWNER_ID`. Silently ignore all other messages.
 
-## Notes
+## Non-text content
 
-- grammY handles long polling natively — no webhook or HTTP server needed
-- `bot.start()` runs long polling and does not resolve until the bot stops — don't await it during registration or it will block startup. Fire and forget it.
-- Supports text, photos, documents, voice messages, and stickers. For non-text content, normalize to a placeholder string (e.g. `[photo]`, `[voice message]`) since the agent only handles text for now.
+Supports text, photos, documents, voice messages, and stickers. For non-text content, normalize to a placeholder string (e.g. `[photo]`, `[voice message]`) since the agent only handles text for now.
+
+## Gotchas
+
+- **`bot.start()` blocks forever.** It runs long polling and does not resolve until the bot stops. Don't await it during registration or it will block the entire process. Fire and forget it.
+- **Message length limit.** Telegram caps messages at 4096 characters. The agent can easily exceed this. Split long replies into multiple messages.
+- **Typing indicator expires.** Telegram's typing indicator lasts about 5 seconds. If the agent takes longer, re-send the typing action periodically until the response is ready.
+- grammY handles long polling natively — no webhook or HTTP server needed.
