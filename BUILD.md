@@ -128,4 +128,4 @@ Use a PID file (`.logos.pid`) at the project root and write logs to `logs/`. Bot
 
 ## When you're done
 
-Remove the reference to this file from `AGENTS.md` and delete `BUILD.md`. It has served its purpose.
+Remove the reference to this file from `AGENTS.md`. The build is complete.
