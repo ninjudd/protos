@@ -129,9 +129,16 @@ Use a PID file (`.logos.pid`) at the project root and write logs to `logs/`. Bot
 
 After starting the background process, wait a couple of seconds and check if the PID is still alive. If it died, print the last few lines of the log so the user can see what went wrong.
 
-### 10. Validate
+## Before you're done
 
-Run the scenarios in `evals/` to verify the build works end-to-end. Each file describes a test case — follow the steps and confirm the expected behavior.
+Verify the build before handing it off:
+
+- `tsc --noEmit` passes with no errors
+- `./logos start` with blank credentials fails and shows the error in the terminal
+- `./logos start` with blank credentials then `./logos status` reports not running
+- `SOUL.md` has not been overwritten — it still contains the first-run template
+- `cron/config.yaml`, `memory.md`, and `skills/` are unchanged from the repo defaults
+- The wrapper script is executable (`chmod +x logos`)
 
 ## When you're done
 

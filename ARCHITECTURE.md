@@ -182,7 +182,6 @@ logs/               # Runtime logs (gitignored)
 skills/             # Agent skills (agentskills.io format)
   self-edit/
     SKILL.md
-evals/              # Validation scenarios for testing the build
 recipes/            # Implementation guides for channels and capabilities
   telegram.md
   whatsapp.md

@@ -74,9 +74,6 @@ recipes/            # Implementation guides for adding capabilities
   voice-input.md    # Capability recipes
   voice-output.md
 
-# Validation
-evals/              # Test scenarios for verifying the build
-
 # Code (generated during bootstrap)
 src/                # All source code lives here
 ```
