@@ -13,7 +13,7 @@ Don't worry about the assistant's name or personality — those are configured o
 
 ## Key packages
 
-- `ai` — **Vercel AI SDK**. Provides `generateText` with built-in tool execution. Limit the number of tool-use steps to prevent runaway loops. Do not manually implement a tool loop.
+- `ai` — **Vercel AI SDK**. Use the latest version. Provides `generateText` with built-in tool execution. Limit the number of tool-use steps to prevent runaway loops. Do not manually implement a tool loop.
 - `@ai-sdk/anthropic` — Anthropic provider for the AI SDK (default). Can be swapped for `@ai-sdk/openai`, `@ai-sdk/google`, etc.
 - `better-sqlite3` — SQLite driver
 - `js-yaml` — YAML parsing for cron config and skill frontmatter
@@ -79,7 +79,7 @@ Start with a minimal set of tools:
 
 - **remember** — append a note to today's file in `memories/` (e.g. `memories/2026-03-09.md`)
 - **recall** — read `memory.md` and optionally search recent daily files in `memories/`
-- **shell** — run a shell command using bash on the host (project root as cwd, 30-second timeout, 1 MB output limit)
+- **shell** — run a shell command asynchronously using bash on the host (project root as cwd, 30-second timeout, 1 MB output limit). Don't block the event loop.
 
 Skills are markdown instruction files in `skills/` that follow the [Agent Skills](https://agentskills.io) standard. At startup, scan `skills/` for directories containing `SKILL.md`, extract the YAML frontmatter block (between `---` delimiters), parse it with `js-yaml` (not regex) to get each skill's `name` and `description`, and include them in the system prompt so the agent knows what's available. When the agent decides to use a skill, it reads the full `SKILL.md` for instructions.
 
