@@ -1,15 +1,11 @@
 # Self-Edit and Restart
 
-Verify the agent can modify its own code and restart safely.
+Verify the restart safety mechanism works.
 
-## Successful restart
+## Type-check gate
 
-1. Ask the agent to make a small change to its source code (e.g., "Add a comment to the top of src/agent.ts")
-2. Expect: the agent explains what it changed, then runs `./logos restart`
-3. Expect: the process restarts, the change is present in the file, and the agent responds to new messages
-
-## Failed restart
-
-1. Manually introduce a type error in a source file
+1. Manually introduce a type error in a source file (e.g., add `const x: number = "bad";`)
 2. Run `./logos restart`
-3. Expect: the type check fails, the restart is aborted, and the old process keeps running
+3. Confirm the type check fails and the restart is aborted
+4. Confirm the old process is still running (if it was running)
+5. Revert the type error

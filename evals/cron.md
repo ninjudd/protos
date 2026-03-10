@@ -2,14 +2,20 @@
 
 Verify scheduled jobs run and route correctly.
 
-## Heartbeat
+## Steps
 
-1. Start Logos and wait for the heartbeat to fire (every 30 minutes, or temporarily change the cron expression to `* * * * *` for testing)
-2. If nothing needs attention, the agent should respond with `NO_REPLY` and no message should appear in the owner's chat
-3. Check the database — no `NO_REPLY` messages should be stored
+1. Add a temporary test job to `cron/config.yaml`:
+   ```yaml
+   - name: test
+     cron: "* * * * *"
+     prompt: "Say exactly: CRON_TEST_OK"
+   ```
+2. Start Logos and wait up to 60 seconds
+3. Check the database for a message with conversationId containing "test" and text containing "CRON_TEST_OK"
+4. Remove the test job from `cron/config.yaml`
 
-## Scheduler routing
+## NO_REPLY behavior
 
-1. Add a test cron job with an inline prompt that says "Say hello"
-2. Wait for it to fire
-3. Expect: the agent's reply appears in the owner's main chat on the primary channel
+1. The heartbeat job should fire every 30 minutes (or adjust to `* * * * *` temporarily)
+2. When it fires with nothing to report, the agent should respond with `NO_REPLY`
+3. Confirm no `NO_REPLY` string is stored in the database

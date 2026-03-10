@@ -142,9 +142,10 @@ The typical flow: the agent edits a file, sends a message explaining what it cha
 
 1. Initialize SQLite database (create tables if they don't exist)
 2. Discover skills (scan `skills/` for `SKILL.md` files, load names and descriptions)
-3. Register channels (each channel checks for its credentials and connects if present). If no channels connect, exit with an error — there's nothing to do without at least one channel.
-4. Start the scheduler (load cron jobs from `cron/config.yaml`)
-5. Begin processing incoming messages
+3. Start the HTTP channel (always available for testing and local use)
+4. Register messaging channels (each checks for its credentials and connects if present). If none connect, log a warning.
+5. Start the scheduler (load cron jobs from `cron/config.yaml`)
+6. Begin processing incoming messages
 
 ## File structure
 
@@ -162,6 +163,7 @@ src/
   scheduler.ts      # Cron scheduler
   channels/
     registry.ts     # Static channel registration
+    http.ts         # HTTP channel (always on, used for evals and local testing)
     telegram.ts     # Telegram channel
     ...             # One file per channel
 

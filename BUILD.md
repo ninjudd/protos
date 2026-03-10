@@ -86,13 +86,19 @@ Skills are markdown instruction files in `skills/` that follow the [Agent Skills
 
 - Import each channel statically and call its `register()` function with the router — no runtime file scanning
 - A channel's `register()` returns whether it connected successfully (may be async) — `true` if it connected, `false` if credentials were missing and it skipped
-- Count the channels that actually connected. If zero, the process should exit with a clear error — there's nothing to connect to.
+- Count the messaging channels that actually connected (not counting the HTTP channel). If zero, log a warning — the HTTP channel still works for testing, but no messaging platform is connected.
 
-### 6. Build the user's chosen channel
+### 6. Build the HTTP channel
+
+Before building the user's chosen messaging channel, build a simple HTTP channel first. This channel starts a local HTTP server that accepts POST requests with a JSON body (`{ "text": "..." }`) and returns the agent's reply. It's used for eval validation (step 10) and is useful for local testing without any messaging credentials.
+
+The HTTP channel is always registered. It listens on a configurable port (e.g., `HTTP_PORT` environment variable, default 3000). Since it's local-only, no owner filtering is needed.
+
+### 7. Build the user's chosen channel
 
 Read the recipe file in `recipes/` for the channel the user chose. Follow its setup instructions. The channel must only forward messages from the owner (identified by the owner ID in the recipe's environment variables) and silently ignore everyone else. Get the full loop working end-to-end before adding anything else.
 
-### 7. Build the scheduler
+### 8. Build the scheduler
 
 - On startup, parse `cron/config.yaml` — jobs are under the `jobs:` key, each with a `name` and `cron` expression
 - Use `node-cron` to schedule each job
@@ -101,7 +107,7 @@ Read the recipe file in `recipes/` for the channel the user chose. Follow its se
 
 The heartbeat is just a cron job (`*/30 * * * *`) — no special implementation needed. It's already defined in `cron/config.yaml`.
 
-### 8. Wire it all together
+### 9. Wire it all together
 
 The entry point:
 
@@ -110,9 +116,9 @@ The entry point:
 3. Starts the scheduler
 4. Logs that it's running
 
-That's it. No HTTP server needed unless a channel requires a webhook.
+That's it.
 
-### 9. Create the `./logos` wrapper script
+### 10. Create the `./logos` wrapper script
 
 Create a simple bash script at the project root called `logos` that supports:
 
@@ -129,9 +135,9 @@ Use a PID file (`.logos.pid`) at the project root and write logs to `logs/`. Bot
 
 After starting the background process, wait a couple of seconds and check if the PID is still alive. If it died, print the last few lines of the log so the user can see what went wrong.
 
-### 10. Validate
+### 11. Validate
 
-Run the scenarios in `evals/` to verify the build works end-to-end. Each file describes a test case — follow the steps and confirm the expected behavior.
+Before running evals, ask the user for their `ANTHROPIC_API_KEY` and write it to `.env`. Then run each eval scenario in `evals/` using the HTTP channel — no messaging platform credentials needed. Each eval file describes what to test and what to expect.
 
 ## When you're done
 
