@@ -8,7 +8,7 @@ The workspace is organized into **five sibling domains**, each with a distinct r
 
 ```
 logos/                # workspace root
-  spec/               # the blueprint — ARCHITECTURE, BUILD, recipes, defaults
+  spec/               # the blueprint — architecture, build, recipes, defaults
   agent/              # generated implementation — code that the bootstrap produces
   config/             # behavior — identity, instance overrides, .env
   memory/             # durable state — facts, preferences, journal

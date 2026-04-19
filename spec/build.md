@@ -1,6 +1,6 @@
 # Build
 
-Step-by-step instructions for building Logos from the spec. Read `architecture.md` first.
+Step-by-step instructions for building Logos from the spec. Read `architecture.md` first — it defines the contracts this document tells you to implement.
 
 All paths in this document are **relative to the workspace root** (the directory that contains `spec/`, `agent/`, `config/`, etc.). Run all commands from there.
 
@@ -35,7 +35,7 @@ At minimum:
 - The API key for whichever AI provider you're using (e.g. `ANTHROPIC_API_KEY` for Anthropic)
 - `AI_MODEL` — model to use. Default to a sensible current model; don't pin exact version strings since model names change frequently.
 - `PRIMARY_CHANNEL` — the channel used for the owner's main conversation (e.g. `telegram`). The scheduler sends replies here.
-- `LOGOS_SELF_EDIT` — `true` (default) or `false`. When false, the `self-edit` skill is hidden and the file-edit tools refuse writes under `agent/`. See step 4c below for the enforcement details.
+- `LOGOS_SELF_EDIT` — `true` (default) or `false`. See `architecture.md` → Self-modification for the toggle's effects.
 - `LOGOS_TERMINAL` — `true` (default) or `false`. When false, the terminal channel doesn't bind the socket and `agent/logos chat` has no daemon to connect to.
 - `LOGOS_TERMINAL_SOCKET` — optional override for the terminal socket path. Defaults to `runtime/logos.sock`.
 - `LOGOS_WEB_FETCH` — `true` (default) or `false`. When false, the `web_fetch` tool refuses every call.
@@ -55,13 +55,13 @@ Channel-specific variables (including the owner's ID on that platform) are liste
 - Target ES2022 with Node module resolution
 - Keep configuration minimal
 - Install packages with `npm install <package-name>` from inside `agent/` rather than writing `package.json` by hand — this ensures you get the latest versions and only lists direct dependencies. **Never manually edit the `dependencies` or `devDependencies` objects in `package.json`.**
-- Source code lives in `agent/src/`. Top-level engine modules (`index.ts`, `router.ts`, `agent.ts`, `scheduler.ts`, `threads.ts`, `memory.ts`) sit at `agent/src/` root. Capability code lives in `agent/src/channels/` and `agent/src/tools/`.
+- Source code goes in `agent/src/` per the file structure in `architecture.md`.
 - Use `process.cwd()` for the workspace root path, not `import.meta.dirname` — tsx runs in CJS mode where `import.meta.dirname` is undefined. The wrapper script ensures the process runs with the workspace root as cwd.
 - Create `config/` if it doesn't exist (the agent should do this on first run, but the build can pre-create it). Create a `config/.env` template with the API key for the chosen provider, `AI_MODEL`, `PRIMARY_CHANNEL`, and any channel-specific variables. Leave secrets blank for the user to fill in.
 
 ### 1a. Initialize Git repos for agent/, config/, memory/
 
-For each of `agent/`, `config/`, `memory/`: if the directory does not already contain a `.git/`, run `git init` and make an initial commit. This is **required for `agent/`** — the safe-restart auto-revert relies on `HEAD` existing. Without this, a self-edit that crashes on startup can't be rolled back.
+For each of `agent/`, `config/`, `memory/`: if the directory does not already contain a `.git/`, run `git init` and make an initial commit. This is **required for `agent/`** — the safe-restart auto-revert relies on `HEAD` existing. Without this, a self-edit that crashes on startup can't be rolled back. See `architecture.md` → Git repos per domain for the rationale.
 
 Per-domain specifics:
 
@@ -75,61 +75,55 @@ If any of these directories already has a `.git/`, leave it alone — the user i
 
 ### 2. Set up message storage
 
-No database. Each conversation is an append-only JSONL file at `runtime/threads/{channelId}/{conversationId}.jsonl`. Each line is one message:
+Implement `agent/src/threads.ts`. Storage format and semantics are defined in `architecture.md` → Storage / Message history.
 
-```jsonl
-{"role":"user","text":"hi","timestamp":"2026-04-18T10:30:00.000Z"}
-{"role":"assistant","text":"hello!","timestamp":"2026-04-18T10:30:02.000Z"}
-```
+Two functions to export:
 
-Create a small module (e.g. `agent/src/threads.ts`) with two functions:
-
-- `appendMessage(channelId, conversationId, role, text, timestamp)` — ensure the parent directory exists, then append one JSON line with a trailing `\n`. Use `fs.promises.appendFile` (which creates the file if missing) or write a thin wrapper. Sanitize `channelId` and `conversationId` to safe path segments — reject anything with `/`, `..`, or other path-escape characters.
-- `getHistory(channelId, conversationId, limit)` — read the file (return empty if it doesn't exist), split on newlines, parse each line as JSON, drop empty/malformed lines, and return the last `limit` entries.
+- `appendMessage(channelId, conversationId, role, text, timestamp)` — ensure the parent directory exists, then append one JSON line with a trailing `\n`. Use `fs.promises.appendFile`. Sanitize `channelId` and `conversationId` to safe path segments — reject anything with `/`, `..`, or other path-escape characters.
+- `getHistory(channelId, conversationId, limit)` — read the file (return empty if missing), split on newlines, parse each line as JSON, drop empty/malformed lines, return the last `limit` entries.
 
 The router serializes per-conversation, so `appendMessage` never has a concurrent writer on the same file. No locking needed.
 
-Everything else (memory, skills, cron, identity) lives on the filesystem in the appropriate domain — see `architecture.md`.
-
 ### 3. Build the router
 
-The router:
+Implement `agent/src/router.ts`. Behavior contract is in `architecture.md` → Router (especially the `NO_REPLY` semantics and the [Channel `send()` contract](architecture.md)).
 
-- Accepts incoming messages from channels (channelId, conversationId, text, timestamp)
-- Queues messages per-conversation so only one agent invocation runs per conversation at a time
-- Stores the inbound message, then retrieves conversation history (which now includes it). Passes only the history to the agent — no separate "current message" parameter. The last message in the history is the one the agent is replying to.
-- **Stores the assistant's response in the JSONL and calls the channel's `send` function — even when the response is `NO_REPLY`.** Store the response as-is. When the agent returns `NO_REPLY` (exact match after `.trim()`), the JSONL gets `{"role":"assistant","text":"NO_REPLY","timestamp":"..."}` and `send("NO_REPLY")` is called on the channel. Channels handle the literal `NO_REPLY` marker per the channel `send()` contract (architecture.md → Channel `send()` contract): no display, but clean up turn-scoped UI.
+Implementation:
 
-  This unified pipeline (always append, always call send) is how typing/thinking indicators get cleared when the agent decides to stay silent. There is no separate "turn ended" callback — the `NO_REPLY` send IS the signal. The same string flows through the agent's output, the JSONL, and the API view — no translation layer, nothing for the model to misinterpret.
+- Per-conversation queue using a `Map<conversationId, Promise>` so each conversation runs serially.
+- For each inbound message: append to JSONL via `threads.appendMessage`, fetch history via `threads.getHistory`, hand history to the agent, append the assistant reply to JSONL, call `channel.send(conversationId, reply)`.
+- The reply is stored and sent **as-is** — including the literal string `NO_REPLY`. No translation. Channels detect `NO_REPLY` themselves per the contract.
 
 ### 4. Build the agent
 
 Use the Vercel AI SDK's `generateText` for automatic tool execution. Limit the number of tool-use steps to prevent runaway loops. Do not manually implement a tool loop.
 
-- Use the `@ai-sdk/anthropic` provider by default
-- Read the model from the `AI_MODEL` environment variable with a sensible default
-- The system prompt is assembled from:
-  1. `config/SOUL.md` (identity) — if missing, run the first-run flow (see step 4a)
-  2. A **memory manifest** — a flat list of every memory file with its name, aliases, tags, and a one-line summary. **Do NOT load full file contents.** The summary comes from (in order): the frontmatter `description:` field, the first H1 heading in the body, or the first ~100 chars of body text. The agent uses `find_memory` and `read_file` to fetch full content on demand.
-  3. The last 24 hours of `memory/journal/` entries inline (these are recent agent-authored notes likely to be relevant; older journal entries appear in the manifest only)
-  4. A summary of available skills (names and descriptions from `spec/skills/*/SKILL.md` and `config/skills/*/SKILL.md` frontmatter; config wins on name collision)
-  5. Today's date — so `remember` and other date-aware behavior work without a tool call
-  6. **A "How you operate" block** — a fixed paragraph explaining the agent's invocation model so it understands its own architecture. Include verbatim:
-
-     ```
-     You run continuously and can be invoked in two ways:
-
-     - **User messages** from connected channels (e.g. Telegram, terminal chat). When the user sends a message, you receive it as the latest entry in the conversation history and respond.
-
-     - **Scheduled cron jobs.** The scheduler periodically injects a synthetic prompt from a job definition (see "Scheduled tasks" below). Cron is your mechanism for proactive outreach — when a heartbeat fires, that's your chance to reach out to the user. To send a proactive message, just respond normally; your reply is delivered to the user's primary messaging channel. Reply with exactly `NO_REPLY` if there's nothing worth saying.
-     ```
-
-     This block is static — the same text every invocation. Without it the agent doesn't know that cron exists, doesn't realize heartbeats are the proactive-outreach mechanism, and may incorrectly tell users it can't reach out unprompted.
-
-  7. **Active cron jobs** — a flat list of `name • schedule • summary` for each enabled merged job (the same merged set the scheduler loaded from `spec/cron/` + `config/cron/`). Summary is the frontmatter `description:` field if present, else the first H1 heading in the body, else the first ~100 chars of body. Skip disabled jobs. This makes the agent aware of what's scheduled to fire and what each job is for, so it can recognize cron-originated prompts when they arrive.
+- Use the `@ai-sdk/anthropic` provider by default.
+- Read the model from the `AI_MODEL` environment variable with a sensible default.
 - The agent receives conversation history (the current message is already the last entry). Pass it directly to the SDK as the messages array.
 - Cap conversation history at 50 messages (most recent) to avoid blowing past token limits. Apply the cap when retrieving history, not in the agent.
 - Guard against oversized prompts. Estimate tokens using a 4:1 character-to-token ratio. First, truncate any individual message over 10,000 tokens. Then, if the total (system prompt + messages) exceeds 150,000 tokens, drop the oldest messages until it fits.
+
+#### System prompt assembly
+
+The system prompt is concatenated from these sections, in order:
+
+1. **`config/SOUL.md`** (identity) — if missing, run the first-run flow (see step 4a).
+2. **Memory manifest** — see `architecture.md` → Memory format → Loading into context. Build it from the memory module's manifest output (step 4b).
+3. **Last 24 hours of `memory/journal/` entries inline** — recent agent-authored notes likely to be relevant; older journal entries appear in the manifest only.
+4. **Skills summary** — names and descriptions from `spec/skills/*/SKILL.md` and `config/skills/*/SKILL.md` frontmatter; config wins on name collision. Skills loader described in step 4b.
+5. **Today's date** — so `remember` and other date-aware behavior work without a tool call.
+6. **A "How you operate" block** — fixed verbatim text below. This block must be static — same string every invocation. Without it the agent doesn't know cron exists and may incorrectly tell users it can't reach out unprompted.
+
+   ```
+   You run continuously and can be invoked in two ways:
+
+   - **User messages** from connected channels (e.g. Telegram, terminal chat). When the user sends a message, you receive it as the latest entry in the conversation history and respond.
+
+   - **Scheduled cron jobs.** The scheduler periodically injects a synthetic prompt from a job definition (see "Scheduled tasks" below). Cron is your mechanism for proactive outreach — when a heartbeat fires, that's your chance to reach out to the user. To send a proactive message, just respond normally; your reply is delivered to the user's primary messaging channel. Reply with exactly `NO_REPLY` if there's nothing worth saying.
+   ```
+
+7. **Active cron jobs** — flat list of `name • schedule • summary` for each enabled merged job (the same merged set the scheduler loaded from `spec/cron/` + `config/cron/`). Summary is the frontmatter `description:` field if present, else the first H1 heading in the body, else the first ~100 chars of body. Skip disabled jobs.
 
 #### 4a. First-run flow
 
@@ -139,123 +133,90 @@ If `config/SOUL.md` doesn't exist when the agent assembles its system prompt:
 - After the user answers, the agent writes `config/SOUL.md`. Subsequent invocations read it normally.
 - Also ensure `config/`, `memory/`, and `runtime/` directories exist; create them if not.
 
-Tools live in `agent/src/tools/`. Each built-in tool has a recipe in `spec/tools/{name}.md` describing its inputs, outputs, behavior, and dependencies. Implement one tool per recipe.
+#### Tools
 
-Bundled tools to build:
+Implement one tool per recipe under `spec/tools/`. Each recipe is the contract for that tool — inputs, outputs, behavior, dependencies.
 
-- `read_file` — see `spec/tools/read_file.md`
-- `write_file` — see `spec/tools/write_file.md`
-- `edit_file` — see `spec/tools/edit_file.md`
-- `find_memory` — see `spec/tools/find_memory.md`
-- `remember` — see `spec/tools/remember.md`
-- `shell` — see `spec/tools/shell.md`
-- `delegate_task` — see `spec/tools/delegate_task.md` (sub-agent runner)
-- `web_fetch` — see `spec/tools/web_fetch.md` (uses backend specified by `LOGOS_WEB_FETCH_BACKEND`)
+Bundled tools to build (each has a recipe):
 
-**Conventions all tools follow:**
+- `read_file`, `write_file`, `edit_file`, `find_memory`, `remember`, `shell`, `delegate_task`, `web_fetch`
 
-- **Path-safety helper** — share a single `agent/src/tools/_paths.ts` (or similar) used by `read_file`, `write_file`, `edit_file`, and any other path-taking tool. It resolves to absolute and rejects anything escaping the workspace root.
-- **Self-edit guards** — `write_file` and `edit_file` route through that helper; when `LOGOS_SELF_EDIT=false` and the resolved path is under `agent/`, throw `self-edit is disabled; refusing to write under agent/`. The `shell` tool gets a description nudge under the same env var.
-- **Discriminated unions for succeed-or-miss results** (see `find_memory`, `web_fetch`). Never return `null` from a tool. See `architecture.md` → Tool return shapes.
-- **Memory graph cache invalidation** — any tool that writes under `memory/` (`write_file`, `edit_file`, `remember`) must invalidate `runtime/memory-graph.json`.
+Implementation conventions:
 
-Custom tools are added by dropping `.ts` files directly into `agent/src/tools/` alongside the built-in ones. Loader scans that single directory. Custom tools that warrant documentation can have a colocated `.md` (same pattern as channels), but it's not required.
+- **Path-safety helper** — share a single `agent/src/tools/_paths.ts` (or similar) used by every path-taking tool. The helper resolves to absolute, rejects paths escaping the workspace root, and enforces the `spec/` and `agent/` write guards (see `architecture.md` → Self-modification for what those guards are and when they apply).
+- **Memory graph cache invalidation** — any tool that writes under `memory/` (`write_file`, `edit_file`, `remember`) must delete `runtime/memory-graph.json` so the next `find_memory` rebuilds.
+- **Tool return shapes** follow `architecture.md` → Tool return shapes. Never return bare `null` from a tool.
 
-#### 4b. Memory graph
+Custom tools are added by dropping `.ts` files directly into `agent/src/tools/` alongside the built-in ones. Loader scans that single directory.
 
-Memory uses Obsidian-compatible markdown with `[[wiki-link]]` syntax (see `architecture.md` → Memory format for the conventions).
+#### 4b. Memory module
 
-Build a small memory module (e.g. `agent/src/memory.ts`) with:
+Implement `agent/src/memory.ts`. Resolution rules, manifest format, backlink semantics, and Obsidian compatibility are defined in `architecture.md` → Memory format.
 
-- **Link resolver** — given a link target (a name, optionally with path hints), find the matching file under `memory/` using these rules in order:
-  1. Filename match (without `.md`) or alias match (from frontmatter `aliases:`)
-  2. If multiple, pick shortest path, then alphabetical
-  3. If none, return null. Do NOT auto-create. The agent decides whether to create a missing note (via `write_file` with `mode: "create"`).
-- **Graph builder** — at startup, scan `memory/**/*.md`, parse frontmatter and `[[...]]` links from each file, build:
-  - A name index (filename + aliases → file path)
-  - A backlink index (file path → list of files that link to it)
-  - A **manifest** for the system prompt: a flat list of `{ relPath, name, aliases, tags, summary }` for every file. `summary` is the frontmatter `description:` field if present, else the first H1 heading, else the first ~100 chars of body.
-- **Cache** — write the graph to `runtime/memory-graph.json` after building. On startup, check the cache: if all source file mtimes are <= the cache's mtime, use it; otherwise rebuild.
-- **Frontmatter parser** — use `js-yaml` to parse the YAML block between `---` delimiters at the top of each file. Tolerate missing or malformed frontmatter (treat as empty).
+The module exports:
 
-The `find_memory` tool wraps the resolver. The internal resolver function may return `null` on miss, but the tool wrapper MUST translate that to `{ found: false }` (see the tool return shape above). The agent then checks `result.found`, and if true, uses `read_file(result.path)` to fetch contents.
+- **Link resolver** — given a name (optionally path-qualified), return the matching file path or `null` per the resolution rules. Does NOT auto-create.
+- **Graph builder** — at startup, scan `memory/**/*.md`, parse frontmatter and `[[...]]` links, build a name index, a backlink index, and the manifest entries.
+- **Cache** — write the graph to `runtime/memory-graph.json`. On startup, check the cache: if all source file mtimes are ≤ the cache's mtime, use it; otherwise rebuild.
+- **Frontmatter parser** — use `js-yaml` to parse the YAML block between `---` delimiters. Tolerate missing or malformed frontmatter (treat as empty).
 
-Skills are markdown instruction files following the [Agent Skills](https://agentskills.io) standard. At startup, scan both `spec/skills/` and `config/skills/` for directories containing `SKILL.md`. Extract the YAML frontmatter block (between `---` delimiters), parse it with `js-yaml` (not regex) to get each skill's `name` and `description`, and include them in the system prompt. On name collision, `config/` wins. When the agent decides to use a skill, it reads the full `SKILL.md` for instructions.
+Skills loader: scan both `spec/skills/` and `config/skills/` for directories containing `SKILL.md`. Extract the YAML frontmatter with `js-yaml` (not regex). On name collision, `config/` wins.
 
 #### 4c. Self-edit enforcement
 
-Self-edit is controlled by the `LOGOS_SELF_EDIT` env var (default `true`). Read it once at startup and thread the boolean through the tool loader and skills loader.
+Read `LOGOS_SELF_EDIT` once at startup and thread the boolean through the tool loader and skills loader. Behavior is defined in `architecture.md` → Self-modification.
 
-**`spec/` is always read-only at runtime** (regardless of `LOGOS_SELF_EDIT`):
+What you must implement:
 
-- **`write_file` and `edit_file` always refuse writes under `spec/`.** In the path-safety helper, resolve the target path to absolute; if it lives under `{workspace}/spec/`, throw `spec/ is read-only at runtime; instance-specific changes belong in config/`. No env var disables this — `spec/` is shared design and not appropriate to mutate from the running daemon. The tools can still write to `agent/`, `config/`, `memory/`, and `runtime/` (subject to the self-edit guard below).
-- **`shell` tool description always carries a nudge:** `NOTE: spec/ is read-only at runtime. Do not modify files under spec/ via shell — instance-specific changes belong in config/.` This is convention, not enforcement — for hard enforcement, sandbox `spec/` read-only too.
-
-When `LOGOS_SELF_EDIT=false` (additional layer):
-
-- **Skills loader skips `self-edit`.** When walking `spec/skills/`, filter out the `self-edit` directory before registering. The agent never sees the skill in its system prompt.
-- **`write_file` and `edit_file` refuse writes under `agent/`** (in addition to the always-on `spec/` guard). Same path-safety helper, same shape of error. The tools can still write to `config/`, `memory/`, and `runtime/`.
-- **`shell` tool description gets a second nudge appended** (in addition to the always-on `spec/` nudge): `NOTE: self-edit is disabled. Do not modify files under agent/.`
-
-**These are application-level guards, not OS-level enforcement.** A determined agent with `shell` can bypass them. For guaranteed enforcement, sandbox the process — see the Sandboxing section at the end of this document.
+- **Always-on `spec/` write guard** in the path-safety helper: any path under `{workspace}/spec/` throws `spec/ is read-only at runtime; instance-specific changes belong in config/`. Independent of `LOGOS_SELF_EDIT`.
+- **Conditional `agent/` write guard** when `LOGOS_SELF_EDIT=false`: paths under `{workspace}/agent/` throw `self-edit is disabled; refusing to write under agent/`.
+- **Skills loader filter** when `LOGOS_SELF_EDIT=false`: skip the `self-edit` directory in `spec/skills/` so the skill is hidden from the agent's prompt.
+- **Shell tool description nudges**: always include the `spec/` warning; conditionally append the `agent/` warning when `LOGOS_SELF_EDIT=false`. These are conventions, not enforcement — see Sandboxing below for hard enforcement.
 
 #### 4d. Sub-agent runner
 
-The `delegate_task` tool (see `spec/tools/delegate_task.md`) lets the main agent spawn a focused sub-agent in an isolated context. Implement the runner at `agent/src/agents/runner.ts`:
+Implement `agent/src/agents/runner.ts`. Tool contract is in `spec/tools/delegate_task.md`; design rationale and constraints are in `architecture.md` → Sub-agents.
 
-- **`runSubAgent({ prompt, skills, tools, model })`** — single exported function.
-- **Resolve skills:** for each name in `skills`, find the matching `SKILL.md` (search `spec/skills/` then `config/skills/`; config wins on collision). Read the FULL body. Return `{ ok: false, error }` if any skill is missing.
-- **Resolve tools:** look up each tool name in the loaded tools map (the same map `agent.ts` builds for the main agent). **Always strip `delegate_task` from the resolved set** — sub-agents don't get to spawn sub-agents (single-level delegation, period). Return `{ ok: false, error }` if any other tool is missing.
-- **Build the system prompt:** concatenate, in order:
-  1. A framing line: `"You are a focused sub-agent invoked by the main Logos agent. Complete the task described in the user message and return your final response. You have no access to the main agent's identity, memory, or conversation history beyond what's stated below."`
-  2. Today's date.
-  3. The full body of each loaded skill (separated by blank lines).
-- **Call `generateText`** with the system prompt, the `prompt` argument as the user message, the resolved tool subset, the model from the argument or `AI_MODEL` env, and a step limit equal to the main agent's (e.g. `stepCountIs(25)` to start).
-- **Log the invocation** to `runtime/logs/` (or a sub-agents-specific logfile) with: timestamp, skills, tools, model, duration, token usage. Do NOT include the prompt or response text in the log (could contain sensitive content). Operator-only visibility.
-- **Return** `{ ok: true, response: text }` on success or `{ ok: false, error: message }` on any thrown error during resolution or execution.
+Single exported function `runSubAgent({ prompt, skills, tools, model })`:
 
-The sub-agent does **NOT** receive: SOUL.md, the memory manifest, recent journal entries, or the main agent's conversation history. Isolation is the point.
+- **Resolve skills** by name from `spec/skills/` then `config/skills/` (config wins). Read the FULL `SKILL.md` body. Return `{ ok: false, error }` if any name is missing.
+- **Resolve tools** from the loaded tools map (the same map `agent.ts` builds). **Always strip `delegate_task`** — sub-agents never recurse, regardless of caller request.
+- **Build the system prompt:** framing line + today's date + concatenated skill bodies (NO SOUL.md, NO memory manifest, NO conversation history).
+- **Call `generateText`** with the system prompt, the `prompt` as the user message, the resolved tool subset, the model from the argument or `AI_MODEL`, and a step limit equal to the main agent's (e.g. `stepCountIs(25)`).
+- **Log the invocation** to `runtime/logs/` (or a sub-agents-specific logfile) with timestamp, skills, tools, model, duration, token usage. Do NOT include the prompt or response text — could contain sensitive content.
+- **Return** `{ ok: true, response: text }` or `{ ok: false, error }`.
+
+Framing line for the system prompt:
+
+> "You are a focused sub-agent invoked by the main Logos agent. Complete the task described in the user message and return your final response. You have no access to the main agent's identity, memory, or conversation history beyond what's stated below."
 
 ### 5. Build the channel registry
 
-- Scan `agent/src/channels/` for `*.ts` files at startup. For each, dynamically import and call its `register()` function with the router. No manual registration list — channels are discovered. Both built-in channels (generated from spec recipes) and custom channels live in the same directory.
-- A channel's `register()` returns the channel's ID, owner conversation ID, and `send` function if it connected successfully — or nothing if credentials were missing and it skipped. When skipping, log which environment variables are missing and how to get them (see the recipe in `spec/channels/{name}.md`).
-- The registry collects connected channels into a map by channel ID so the scheduler can look up any channel's send function and owner conversation ID.
-- If no channels connected, the process should exit with a clear error — there's nothing to connect to.
+Implement `agent/src/channels/index.ts`. Channels are defined in `architecture.md` → Channels (especially the [`send()` contract](architecture.md)).
 
-**Every channel MUST honor the `send()` contract** (architecture.md → Channel `send()` contract): `send(text)` is called exactly once per agent invocation; on `text.trim() === "NO_REPLY"` (the lifecycle marker), the channel must NOT display anything but MUST clean up any turn-scoped state (typing indicators, refresh loops, etc.). This is general — applies to every channel, present and future.
+- Scan `agent/src/channels/` for `*.ts` files at startup. For each, dynamically import and call its `register()` function with the router. No manual registration list.
+- A channel's `register()` returns `{ channelId, ownerConversationId, send }` if it connected, or nothing if credentials were missing. When skipping, log which environment variables are missing and how to get them (see the recipe in `spec/channels/{name}.md`).
+- The registry collects connected channels into a map by channel ID so the scheduler can look up any channel's send function and owner conversation ID.
+- If no channels connected, exit with a clear error.
 
 ### 6. Build the user's chosen channel
 
-Read the recipe at `spec/channels/{name}.md` for the channel the user chose and follow its setup instructions. The implementation goes at `agent/src/channels/{name}.ts`. The channel must only forward messages from the owner (identified by the owner ID in the recipe's environment variables) and silently ignore everyone else. Get the full loop working end-to-end before adding anything else.
+Read the recipe at `spec/channels/{name}.md` and follow its setup instructions. The implementation goes at `agent/src/channels/{name}.ts`. The channel must only forward messages from the owner (identified by the owner ID in the recipe's environment variables) and silently ignore everyone else. Get the full loop working end-to-end before adding anything else.
 
 ### 6b. Build the terminal channel (always included)
 
-Terminal is a zero-dependency, bundled channel shipped with every bootstrap. It enables local CLI access to the running daemon via `agent/logos chat`. Follow the recipe at `spec/channels/terminal.md` for the full protocol. Key implementation points:
+Terminal is a zero-dependency, bundled channel shipped with every bootstrap. Follow `spec/channels/terminal.md` for the protocol, replay semantics, and rendering rules. Implementation lives at `agent/src/channels/terminal.ts` (server) and `agent/src/cli/chat.ts` (client). Wired into the wrapper as `agent/logos chat` (see step 9).
 
-- **Server side (`agent/src/channels/terminal.ts`):** Binds a Unix domain socket at `runtime/logos.sock` (configurable via `LOGOS_TERMINAL_SOCKET`). Accepts multiple simultaneous client connections. Each client negotiates a starting cursor via `{"from": N}` then receives replay messages, a `live-start` marker, and live `message` events as the JSONL file grows. Implement cursor-driven replay by reading the thread JSONL with line numbers and watching the file via `fs.watch` for live updates.
-- **Channel ID `terminal`, conversation ID `cli`** (single persistent thread). Owner filtering is by filesystem access to the socket — no env var needed.
-- **Client side (`agent/src/cli/chat.ts`):** Isolated module. Must NOT import from `agent/src/router.ts`, `agent.ts`, `memory.ts`, or any other engine code. It should only import `node:net`, `node:fs/promises`, `node:readline`, and the shared protocol types from a new `agent/src/channels/terminal-protocol.ts` file. The client reads stdin lines, sends `{"type": "message", "text": ...}` to the socket, and prints replies from the socket to stdout. Handles `/quit`, `/exit`, and `Ctrl+D` as clean disconnects.
-- **Cursor persistence:** `runtime/clients/chat.cursor` stores the last-seen index. On start, client reads the cursor file, sends `{"from": N}`; when no cursor file exists, default behavior replays the last 20 messages (client sends `{"from": max(0, total - 20)}`).
-- **Flags:** `--from-start` (replay all), `--last N` (replay last N), `--new` (advance cursor to end without replay), `--session NAME` (use a different cursor file, still writing to the same `cli` thread).
-- **Daemon-not-running check:** `agent/logos chat` should check if `runtime/logos.pid` is alive. If not, exit with a clear message. Don't auto-start.
-
-The `LOGOS_TERMINAL=false` env var disables the channel (same pattern as self-edit toggle): the server doesn't bind the socket, and the channel registry skips it.
+The `LOGOS_TERMINAL=false` env var disables the channel: the server doesn't bind the socket, and the channel registry skips it.
 
 ### 7. Build the scheduler
 
-- On startup, scan both `spec/cron/` and `config/cron/` for `*.md` files. The filename (minus extension) is the job name.
-- For each unique job name, parse frontmatter from the spec and config versions and merge:
-  - **Frontmatter:** start with spec, override with config keys
-  - **Body:** spec body first, config body appended (separated by a blank line)
-  - If `enabled: false` appears in the merged frontmatter, skip the job
-- Use `node-cron` to schedule each enabled job using its merged `schedule` field
-- When a job fires, append a reminder to the merged body: "If you have nothing to say to the owner, respond with NO_REPLY."
-- Look up the primary channel in the registry to get its send function and owner conversation ID. Send the prompt to the agent through the router as a synthetic message addressed to that conversation.
+Implement `agent/src/scheduler.ts`. Cron format, merge rules, and the merged-job table are defined in `architecture.md` → Scheduler.
 
-The default heartbeat (`spec/cron/heartbeat.md`, every 30 minutes) and consolidate-memories job (`spec/cron/consolidate-memories.md`, daily at 23:00) ship with the spec.
-
-Add a CLI subcommand `agent/logos cron` that prints the merged job table with source annotations (`[spec]`, `[config]`, `[spec → overridden by config]`, `[disabled]`).
+- Scan both `spec/cron/` and `config/cron/`, parse frontmatter with `js-yaml`, merge per the layering rules (frontmatter override, body append; skip when merged `enabled: false`).
+- Use `node-cron` to schedule each enabled job using its merged `schedule` field.
+- When a job fires, append a reminder to the merged body: "If you have nothing to say to the owner, respond with NO_REPLY." Then look up the primary channel and dispatch through the router as a synthetic message addressed to the owner's conversation.
+- Add a CLI subcommand `agent/logos cron` that prints the merged job table with source annotations (`[spec]`, `[config]`, `[spec → overridden by config]`, `[disabled]`).
 
 ### 8. Wire it all together
 
@@ -275,18 +236,18 @@ Create a bash script at `agent/logos` that supports:
 
 - `agent/logos` or `agent/logos start` — start the process in the background
 - `agent/logos stop` — stop it
-- `agent/logos restart` — restart it
+- `agent/logos restart` — restart it (with safe-restart protocol below)
 - `agent/logos status` — check if it's running
 - `agent/logos cron` — show the merged cron job table
 - `agent/logos chat [flags]` — connect a terminal client to the running daemon (see step 6b). Passes flags through to `npx tsx agent/src/cli/chat.ts`. Fails fast with "daemon not running; start it with `agent/logos start`" if the daemon PID isn't alive.
 
-The script must be invoked from the workspace root (the parent of `agent/`). It should `cd` to the workspace root if invoked from elsewhere by resolving its own location, then `cd ..` from `agent/`.
+The script must be invoked from the workspace root (the parent of `agent/`). It should `cd` to the workspace root if invoked from elsewhere by resolving its own location.
 
 Run the process with `npx tsx agent/src/index.ts` (not compiled JS). This way the agent can modify its own TypeScript source and restart to apply changes — no build step needed.
 
 Use a PID file at `runtime/logos.pid` and write logs to `runtime/logs/`. Both are gitignored. Append to the log file — don't truncate it on restart.
 
-**`stop` must kill the entire process tree, not just the PID file's PID.** Running the daemon as `npx tsx agent/src/index.ts` produces a multi-process tree (npm wrapper + tsx node child). If `stop` only kills the npm wrapper, the node child gets re-parented to init and survives — invisible to the wrapper, still polling channels, still firing scheduled jobs. Each `restart` then leaks a zombie daemon.
+**`stop` must kill the entire process tree, not just the PID file's PID.** `npx tsx agent/src/index.ts` produces a multi-process tree (npm wrapper + tsx node child). If `stop` only kills the npm wrapper, the node child gets re-parented to init and survives — invisible to the wrapper, still polling channels, still firing scheduled jobs. Each `restart` then leaks a zombie daemon.
 
 Walk the tree with `pgrep -P` and kill recursively:
 
@@ -304,7 +265,7 @@ kill_tree() {
 
 `pgrep` ships on both macOS and Linux. After SIGTERM, give the process a few seconds to shut down gracefully, then SIGKILL the root PID if it's still alive.
 
-**Safe-restart protocol for `restart`:**
+**Safe-restart protocol for `restart`** (architecture: see `architecture.md` → Self-modification):
 
 1. **Snapshot the current `agent/` HEAD.** If `agent/` is a Git repo (`agent/.git` exists), record the current commit SHA with `git -C agent rev-parse HEAD`. If it's not a Git repo, skip the rollback steps below and warn the user that self-edit rollback won't work.
 2. **Typecheck.** Run `tsc --noEmit -p agent/tsconfig.json`. If it fails, abort the restart, keep the old process running, and print the error.
@@ -314,9 +275,7 @@ kill_tree() {
    - If `agent/` is a Git repo and HEAD has moved since the snapshot: run `git -C agent reset --hard <snapshot-sha>` to revert the self-edit, then start the process again with the pre-edit code. Log the auto-revert clearly (`[logos] post-start check failed; auto-reverted agent to <sha> and restarted`).
    - If no Git repo or HEAD is unchanged: leave the process stopped and tell the user to investigate.
 
-This closes the runtime-crash hole in self-edit. `tsc --noEmit` catches compile errors; the post-start health check catches runtime startup errors; Git auto-revert recovers without human intervention.
-
-Note: The auto-revert only affects the last commit (or last few commits, if the agent committed more than once since the snapshot). It does NOT revert committed changes in `config/` or `memory/` — those aren't part of self-edit.
+Auto-revert only affects commits the agent itself made between the snapshot and the failed restart. Changes in `config/` or `memory/` are not part of self-edit.
 
 ## Before you're done
 
@@ -336,23 +295,21 @@ Verify the build before handing it off. Run these checks outside any sandbox so 
 
 ## Sandboxing (optional, for hard self-edit enforcement)
 
-The `LOGOS_SELF_EDIT=false` mode (step 4c) uses tool-level guards — soft enforcement. A determined agent with `shell` access can bypass them. For guaranteed enforcement, run the process in a sandbox with `agent/` mounted or marked read-only. Pick the approach that fits your OS:
+`LOGOS_SELF_EDIT=false` (step 4c) uses tool-level guards — soft enforcement. A determined agent with `shell` access can bypass them. For guaranteed enforcement, run the process in a sandbox with `agent/` and `spec/` mounted read-only. Pick the approach that fits your OS:
 
 **Linux (read-only bind mount):**
 
 ```bash
-# Make agent/ read-only for the process via a bind mount.
 sudo mount --bind agent/ agent/
 sudo mount -o remount,ro,bind agent/
 ```
 
-Or use `bwrap` / `firejail` to namespace-sandbox the process with a read-only view of `agent/`.
+Or use `bwrap` / `firejail` to namespace-sandbox the process with a read-only view of `agent/` and `spec/`.
 
 **macOS (`sandbox-exec`):**
 
 ```bash
 # sandbox.sb denies all writes under agent/src/
-# (partial profile — you'd build on the default policy)
 (version 1)
 (allow default)
 (deny file-write*
@@ -363,9 +320,9 @@ sandbox-exec -f sandbox.sb agent/logos start
 
 **Either platform (separate user):**
 
-Run the agent as a user that only has read access to `agent/` on the filesystem. Owner owns `agent/`; agent user can read + execute but not write.
+Run the agent as a user that only has read access to `agent/` and `spec/` on the filesystem. Owner owns the directories; agent user can read + execute but not write.
 
-None of these are wired into the stock build — they're deployment choices for users who need hard enforcement. Document in your own operations notes.
+None of these are wired into the stock build — they're deployment choices for users who need hard enforcement.
 
 ## When you're done
 
