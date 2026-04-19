@@ -166,6 +166,16 @@ The agent can edit its own source code (`agent/src/`) via its file-edit tools (`
 
 This closes the three failure modes for self-edit: compile errors (caught by typecheck), runtime startup errors (caught by post-start health check + auto-revert), and subtle logic bugs (can be manually reverted via `git` from the running agent).
 
+**Disabling self-edit:** set `LOGOS_SELF_EDIT=false` in `config/.env`. When disabled:
+
+- The `self-edit` skill is hidden from the agent (skills loader skips it).
+- `write_file` and `edit_file` reject any path that resolves under `agent/` with a clear error.
+- The `shell` tool gets a warning appended to its description: "self-edit is disabled; do not modify files under `agent/`." This is a nudge, not enforcement — the shell tool can still technically write anywhere the process user can.
+
+This is **safety by convention plus tool guards** — enough to prevent accidental or unprompted self-edit. For guaranteed enforcement (e.g. against an adversarial or confused agent), run the process in a sandbox with `agent/` mounted read-only. See `BUILD.md` → Sandboxing for OS-specific notes.
+
+Default is `LOGOS_SELF_EDIT=true`. The capability exists and is well-guarded; users nervous about it flip one env var.
+
 `spec/` is not edited by the running agent. Spec changes are made by humans (or coding agents like Claude Code) and applied by asking a coding agent to update `agent/` to match.
 
 ## Storage

@@ -7,6 +7,8 @@ description: Modify the agent's own source code and safely restart to apply chan
 
 You can modify your own source code in `agent/src/`. The process is designed to be safe: compile errors are caught before restart, runtime startup crashes auto-revert the edit.
 
+If this skill is visible to you at all, self-edit is enabled (the skill is hidden when `LOGOS_SELF_EDIT=false`).
+
 ## Steps
 
 1. **Make your code changes** using `edit_file` (surgical find-and-replace) or `write_file` (for whole-file changes or new files). Prefer `edit_file` when possible — smaller, safer.

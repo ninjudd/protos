@@ -35,6 +35,7 @@ At minimum:
 - The API key for whichever AI provider you're using (e.g. `ANTHROPIC_API_KEY` for Anthropic)
 - `AI_MODEL` — model to use. Default to a sensible current model; don't pin exact version strings since model names change frequently.
 - `PRIMARY_CHANNEL` — the channel used for the owner's main conversation (e.g. `telegram`). The scheduler sends replies here.
+- `LOGOS_SELF_EDIT` — `true` (default) or `false`. When false, the `self-edit` skill is hidden and the file-edit tools refuse writes under `agent/`. See step 4c below for the enforcement details.
 
 Channel-specific variables (including the owner's ID on that platform) are listed in each channel recipe under `spec/channels/`.
 
@@ -143,6 +144,18 @@ The `find_memory` tool wraps the resolver. The internal resolver function may re
 
 Skills are markdown instruction files following the [Agent Skills](https://agentskills.io) standard. At startup, scan both `spec/skills/` and `config/skills/` for directories containing `SKILL.md`. Extract the YAML frontmatter block (between `---` delimiters), parse it with `js-yaml` (not regex) to get each skill's `name` and `description`, and include them in the system prompt. On name collision, `config/` wins. When the agent decides to use a skill, it reads the full `SKILL.md` for instructions.
 
+#### 4c. Self-edit enforcement
+
+Self-edit is controlled by the `LOGOS_SELF_EDIT` env var (default `true`). Read it once at startup and thread the boolean through the tool loader and skills loader.
+
+When `LOGOS_SELF_EDIT=false`:
+
+- **Skills loader skips `self-edit`.** When walking `spec/skills/`, filter out the `self-edit` directory before registering. The agent never sees the skill in its system prompt.
+- **`write_file` and `edit_file` refuse writes under `agent/`.** In the path-safety helper that both tools share, add a check: resolve the target path to an absolute path; if it lives under `{workspace}/agent/`, throw with a clear message ("self-edit is disabled; refusing to write under agent/"). The tools can still write to `config/`, `memory/`, and `runtime/`.
+- **`shell` tool description gets a nudge.** When disabled, the `shell` tool's description (what the model sees) includes: "NOTE: self-edit is disabled. Do not modify files under `agent/`." This is best-effort — shell can still technically write anywhere the process user can. Document this limitation in the tool description itself so the model knows it's convention, not enforcement.
+
+**These are application-level guards, not OS-level enforcement.** A determined agent with `shell` can bypass them. For guaranteed enforcement, sandbox the process — see the Sandboxing section at the end of this document.
+
 ### 5. Build the channel registry
 
 - Scan `agent/src/channels/` for `*.ts` files at startup. For each, dynamically import and call its `register()` function with the router. No manual registration list — channels are discovered. Both built-in channels (generated from spec recipes) and custom channels live in the same directory.
@@ -222,6 +235,39 @@ Verify the build before handing it off. Run these checks outside any sandbox so 
 - `spec/cron/heartbeat.md` and `spec/cron/consolidate-memories.md` are unchanged
 - `spec/` is untouched by the build (the bootstrap only writes to `agent/` and optionally creates `config/`)
 - The wrapper script is executable (`chmod +x agent/logos`)
+
+## Sandboxing (optional, for hard self-edit enforcement)
+
+The `LOGOS_SELF_EDIT=false` mode (step 4c) uses tool-level guards — soft enforcement. A determined agent with `shell` access can bypass them. For guaranteed enforcement, run the process in a sandbox with `agent/` mounted or marked read-only. Pick the approach that fits your OS:
+
+**Linux (read-only bind mount):**
+
+```bash
+# Make agent/ read-only for the process via a bind mount.
+sudo mount --bind agent/ agent/
+sudo mount -o remount,ro,bind agent/
+```
+
+Or use `bwrap` / `firejail` to namespace-sandbox the process with a read-only view of `agent/`.
+
+**macOS (`sandbox-exec`):**
+
+```bash
+# sandbox.sb denies all writes under agent/src/
+# (partial profile — you'd build on the default policy)
+(version 1)
+(allow default)
+(deny file-write*
+  (subpath "/absolute/path/to/workspace/agent/src"))
+
+sandbox-exec -f sandbox.sb agent/logos start
+```
+
+**Either platform (separate user):**
+
+Run the agent as a user that only has read access to `agent/` on the filesystem. Owner owns `agent/`; agent user can read + execute but not write.
+
+None of these are wired into the stock build — they're deployment choices for users who need hard enforcement. Document in your own operations notes.
 
 ## When you're done
 
