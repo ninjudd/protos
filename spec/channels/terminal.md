@@ -51,7 +51,13 @@ When a client connects:
 3. Server emits `{"type": "live-start"}` to signal the client is caught up.
 4. Server subscribes to the JSONL file via `fs.watch` and streams new appends as `message` events.
 
-The client stores its cursor at `runtime/clients/{session}.cursor` (default session: `chat`). This gives each client "pick up where I left off" semantics across reconnects. Messages queued while no client was connected (e.g., cron firing when the terminal is closed) are replayed on next connect.
+The client stores its cursor at `runtime/clients/{session}.cursor` (default session: `chat`). The default replay window on connect is computed as `from = min(stored_cursor, total - 20)` — show **at least the last 20 messages** for context, plus everything queued since the last disconnect if that span is longer. This means:
+
+- A fresh `agent/logos chat` in an existing conversation always shows recent context (not an empty screen).
+- Messages queued while disconnected (e.g., cron firing overnight) are never skipped.
+- Whichever span is longer — "last 20" or "since cursor" — is the one you see.
+
+The flags `--from-start`, `--last N`, and `--new` override this default.
 
 ## Owner filtering
 
@@ -70,10 +76,10 @@ Lives at `agent/src/cli/chat.ts` — isolated from the rest of the codebase. Onl
 
 Flags:
 
-- `agent/logos chat` — resume from stored cursor, or default to last 20 messages on first connect
+- `agent/logos chat` — show at least the last 20 messages on connect (see [Cursor-based replay](#cursor-based-replay))
 - `agent/logos chat --from-start` — replay the entire conversation
 - `agent/logos chat --last N` — replay last N messages
-- `agent/logos chat --new` — start fresh (advance cursor to end without replay)
+- `agent/logos chat --new` — advance cursor to end without replay (show only new messages from this point on)
 
 Exit with `Ctrl+D`, `/quit`, or `/exit`. Client disconnect doesn't affect the daemon.
 
@@ -95,3 +101,16 @@ The client formats assistant replies for terminal readability:
 - Keep it simple: small regex-based renderer, not a full markdown parser. Block-level features beyond code fences and headings can be passed through as-is.
 
 Re-render the *entire* assistant message after the wrapping pass — otherwise partial ANSI codes from one line can leak into the next.
+
+### Chat flow and echo suppression
+
+The loop should feel like a normal chat: the user types a line, sees the assistant reply, types the next line. Specifically:
+
+- **Prompt:** `> ` (just the prompt character — no `you>` prefix). This is what the user sees before typing.
+- **After Enter:** the user's typed line is already on screen (readline drew it). The client sends the message and waits.
+- **Echo suppression:** the server's `fs.watch` broadcasts EVERY new line, including the user's own message. The client **MUST NOT re-render** the user's own just-sent message — the user already saw it on the prompt line. Suppress by matching recently-sent outgoing text within a short window (e.g. last 10 seconds, FIFO queue of pending sends; when a live `role: "user"` message matches the front of the queue, skip rendering and pop). This is pragmatic for a single-client setup; cross-client visibility can be improved later by tagging broadcasts with an origin.
+- **During replay:** render all roles (user AND assistant). Replay exists to show the user their history; suppression only applies to *live* `role: "user"` messages.
+- **After assistant reply:** redraw the `> ` prompt for the next turn.
+- **Async output collision:** readline may have the `> ` prompt drawn when an assistant message arrives. Before printing, clear the current line (`readline.cursorTo(out, 0); readline.clearLine(out, 0);`), print the message, then `rl.prompt()` again. Otherwise the prompt and message smash onto the same line (`> logos: ...`).
+
+Assistant messages are rendered with a single-line prefix like `logos:` followed by the body (wrapped, markdown applied). No `you:` or `you>` prefix appears in the rendered output anywhere — only in replay of historical user messages, and even then, plain text (no bold label) is fine.
