@@ -78,6 +78,18 @@ Channels are messaging platform integrations. Each channel:
 
 **Recipes vs implementations:** Channel **recipes** (`.md` setup guides) live in `spec/channels/` — they describe how to build each channel. Channel **implementations** (`.ts` code) live in `agent/src/channels/`. Both built-in channels (generated from spec recipes by the bootstrap) and custom channels (added by the user) live in the same directory — the `agent/` repo is the user's own implementation, so there's no need for a parallel code location in `config/`.
 
+#### Cursor-based replay
+
+Because thread history is stored as append-only JSONL files, any channel with disconnecting clients can support replay with no server-side state. The pattern:
+
+1. Client stores its last-seen line index locally.
+2. On reconnect, client sends `{"from": N}`.
+3. Server reads lines `N..end` from `runtime/threads/{channelId}/{conversationId}.jsonl` and streams them as replay.
+4. Server watches the JSONL file (`fs.watch`) for new appends and streams those live.
+5. Client updates its cursor as messages arrive.
+
+This gives any client-server channel "pick up where I left off" semantics across reconnects — messages queued while no client was connected (e.g., cron firing at night) are delivered on next connect. See the terminal channel for the reference implementation.
+
 ### 2. Router
 
 The router sits between channels and the agent. It:
@@ -306,6 +318,7 @@ spec/
   BUILD.md            # build instructions for coding agents
   channels/           # channel recipes (markdown only)
     telegram.md
+    terminal.md       # local client-server chat over Unix socket
     whatsapp.md
     ...
   skills/             # bundled skills (agentskills.io directory format)
@@ -323,7 +336,7 @@ spec/
 agent/
   package.json
   tsconfig.json
-  logos               # wrapper script (start/stop/restart/status)
+  logos               # wrapper script (start/stop/restart/status/chat)
   src/
     index.ts          # entry point
     router.ts
@@ -331,7 +344,11 @@ agent/
     scheduler.ts
     threads.ts
     memory.ts
+    cli/              # isolated client code — does not import router/agent/memory
+      chat.ts         # terminal client: connects to runtime/logos.sock
     channels/         # built-in + custom channels (built-in generated from spec/channels/ recipes)
+      terminal.ts     # bundled — zero-config client-server channel
+      terminal-protocol.ts  # shared JSON message shapes (server + cli/chat.ts)
       telegram.ts
       ...
     tools/            # built-in + custom tools
@@ -365,7 +382,12 @@ runtime/
   threads/            # one JSONL file per conversation
     telegram/
       12345.jsonl
+    terminal/
+      cli.jsonl       # persistent CLI chat thread
+  clients/            # per-client cursor files
+    chat.cursor       # default terminal client
   logs/
+  logos.sock          # Unix socket for terminal channel
   *.pid
   memory-graph.json   # backlink cache
 ```

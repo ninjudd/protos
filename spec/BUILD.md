@@ -36,6 +36,8 @@ At minimum:
 - `AI_MODEL` — model to use. Default to a sensible current model; don't pin exact version strings since model names change frequently.
 - `PRIMARY_CHANNEL` — the channel used for the owner's main conversation (e.g. `telegram`). The scheduler sends replies here.
 - `LOGOS_SELF_EDIT` — `true` (default) or `false`. When false, the `self-edit` skill is hidden and the file-edit tools refuse writes under `agent/`. See step 4c below for the enforcement details.
+- `LOGOS_TERMINAL` — `true` (default) or `false`. When false, the terminal channel doesn't bind the socket and `agent/logos chat` has no daemon to connect to.
+- `LOGOS_TERMINAL_SOCKET` — optional override for the terminal socket path. Defaults to `runtime/logos.sock`.
 
 Channel-specific variables (including the owner's ID on that platform) are listed in each channel recipe under `spec/channels/`.
 
@@ -167,6 +169,19 @@ When `LOGOS_SELF_EDIT=false`:
 
 Read the recipe at `spec/channels/{name}.md` for the channel the user chose and follow its setup instructions. The implementation goes at `agent/src/channels/{name}.ts`. The channel must only forward messages from the owner (identified by the owner ID in the recipe's environment variables) and silently ignore everyone else. Get the full loop working end-to-end before adding anything else.
 
+### 6b. Build the terminal channel (always included)
+
+Terminal is a zero-dependency, bundled channel shipped with every bootstrap. It enables local CLI access to the running daemon via `agent/logos chat`. Follow the recipe at `spec/channels/terminal.md` for the full protocol. Key implementation points:
+
+- **Server side (`agent/src/channels/terminal.ts`):** Binds a Unix domain socket at `runtime/logos.sock` (configurable via `LOGOS_TERMINAL_SOCKET`). Accepts multiple simultaneous client connections. Each client negotiates a starting cursor via `{"from": N}` then receives replay messages, a `live-start` marker, and live `message` events as the JSONL file grows. Implement cursor-driven replay by reading the thread JSONL with line numbers and watching the file via `fs.watch` for live updates.
+- **Channel ID `terminal`, conversation ID `cli`** (single persistent thread). Owner filtering is by filesystem access to the socket — no env var needed.
+- **Client side (`agent/src/cli/chat.ts`):** Isolated module. Must NOT import from `agent/src/router.ts`, `agent.ts`, `memory.ts`, or any other engine code. It should only import `node:net`, `node:fs/promises`, `node:readline`, and the shared protocol types from a new `agent/src/channels/terminal-protocol.ts` file. The client reads stdin lines, sends `{"type": "message", "text": ...}` to the socket, and prints replies from the socket to stdout. Handles `/quit`, `/exit`, and `Ctrl+D` as clean disconnects.
+- **Cursor persistence:** `runtime/clients/chat.cursor` stores the last-seen index. On start, client reads the cursor file, sends `{"from": N}`; when no cursor file exists, default behavior replays the last 20 messages (client sends `{"from": max(0, total - 20)}`).
+- **Flags:** `--from-start` (replay all), `--last N` (replay last N), `--new` (advance cursor to end without replay), `--session NAME` (use a different cursor file, still writing to the same `cli` thread).
+- **Daemon-not-running check:** `agent/logos chat` should check if `runtime/logos.pid` is alive. If not, exit with a clear message. Don't auto-start.
+
+The `LOGOS_TERMINAL=false` env var disables the channel (same pattern as self-edit toggle): the server doesn't bind the socket, and the channel registry skips it.
+
 ### 7. Build the scheduler
 
 - On startup, scan both `spec/cron/` and `config/cron/` for `*.md` files. The filename (minus extension) is the job name.
@@ -203,6 +218,7 @@ Create a bash script at `agent/logos` that supports:
 - `agent/logos restart` — restart it
 - `agent/logos status` — check if it's running
 - `agent/logos cron list` — show the merged cron job table
+- `agent/logos chat [flags]` — connect a terminal client to the running daemon (see step 6b). Passes flags through to `npx tsx agent/src/cli/chat.ts`. Fails fast with "daemon not running; start it with `agent/logos start`" if the daemon PID isn't alive.
 
 The script must be invoked from the workspace root (the parent of `agent/`). It should `cd` to the workspace root if invoked from elsewhere by resolving its own location, then `cd ..` from `agent/`.
 
