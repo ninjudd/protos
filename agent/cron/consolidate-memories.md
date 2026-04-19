@@ -1,6 +1,10 @@
+---
+schedule: "0 23 * * *"
+---
+
 # Consolidate Memories
 
-Review today's scratch pad in `memories/` and consolidate anything important into `memory.md`.
+Review today's scratch pad in `memory/journal/` and consolidate anything important into `memory/`.
 
 ## What to promote
 
@@ -12,11 +16,11 @@ Review today's scratch pad in `memories/` and consolidate anything important int
 ## What to skip
 
 - Routine exchanges that don't contain new information
-- Anything already captured in `memory.md`
+- Anything already captured in `memory/`
 - Temporary context that won't matter tomorrow
 
-## How to update memory.md
+## How to update memory
 
-- Add new entries under relevant sections (create sections as needed)
+- Add granular entries to relevant files under `memory/` (create files and subdirectories as needed)
 - Remove entries that are outdated or contradicted by new information
-- Keep it concise — this file is read on every invocation, so brevity matters
+- Keep entries concise — `memory/` is read on every invocation, so brevity matters
