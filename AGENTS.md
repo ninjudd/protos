@@ -9,7 +9,7 @@ The workspace is split into four sibling domains:
 - **`agent/`** — the engine. Source code, default capabilities (channels, tools, skills, cron jobs), engine docs. Edit only via the `self-edit` skill.
 - **`config/`** — how this instance behaves. `SOUL.md`, instance-specific tools/skills/channels/cron, secrets in `.env`.
 - **`memory/`** — what you know and are committed to. Granular files of facts, preferences, summaries, and a `journal/` for daily notes.
-- **`runtime/`** — ephemeral state. SQLite database, logs, pid files. Safe to delete and rebuild.
+- **`runtime/`** — ephemeral state. Message threads (JSONL files), logs, pid files. Safe to delete and rebuild.
 
 See `agent/ARCHITECTURE.md` for the full design.
 

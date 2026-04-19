@@ -75,7 +75,7 @@ See [agent/ARCHITECTURE.md](agent/ARCHITECTURE.md) for the full system design.
 ## Principles
 
 - **Your machine, your data.** Everything runs locally. Nothing phones home.
-- **Files over databases.** Memory, skills, and config are readable markdown and YAML. SQLite is only for message history.
+- **Files over databases.** Everything is plain files: identity, memory, skills, cron, and message history. No database, no driver, no schema. `cat` is your inspector.
 - **Specify the what, not the how.** The spec defines components and responsibilities. Implementation details are left to the coding agent.
 - **No speculative features.** Only what's needed for a working assistant.
 - **Four domains.** Engine, behavior, memory, and runtime are separate concerns with separate lifecycles.

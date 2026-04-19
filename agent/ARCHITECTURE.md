@@ -38,7 +38,7 @@ Granular files, not one consolidated file — Git history is more useful when ch
 
 ### `runtime/` — ephemeral state
 
-What is happening right now: SQLite database, logs, pid files, locks, caches. Machine-local, never versioned, safe to delete and rebuild.
+What is happening right now: message threads, logs, pid files, locks, caches. Machine-local, never versioned, safe to delete and rebuild.
 
 Practical rule: if it works well with Git, it belongs in `memory/`. If it doesn't merge well, it belongs in `runtime/`.
 
@@ -48,7 +48,7 @@ Practical rule: if it works well with Git, it belongs in `memory/`. If it doesn'
 |-----------|--------|
 | Runtime | Node.js 18+ |
 | Language | TypeScript |
-| Database | SQLite (messages only) |
+| Storage | Plain files — no database |
 | AI | Vercel AI SDK (`ai`) with `@ai-sdk/anthropic` (default provider) |
 | Hosting | Runs directly on the host — no containers |
 
@@ -129,26 +129,31 @@ The wrapper type-checks the code (`tsc --noEmit`) before restarting. If the chec
 
 ## Storage
 
-Storage breaks down by domain:
+Everything is plain files — no database. Files break down by domain:
 
-### SQLite — messages only (`runtime/`)
+### Message history (`runtime/threads/`)
 
-SQLite stores message history:
+One JSONL file per conversation, at `runtime/threads/{channelId}/{conversationId}.jsonl`. Each line is one message:
 
-- **messages** — channelId, conversationId, role (`user` or `assistant`), text, timestamp
+```jsonl
+{"role":"user","text":"hi","timestamp":"2026-04-18T10:30:00.000Z"}
+{"role":"assistant","text":"hello!","timestamp":"2026-04-18T10:30:02.000Z"}
+```
 
-The database file lives at `runtime/chat.sqlite`. Back it up by copying it.
+- **Append-only writes.** The router serializes per-conversation, so there's never a concurrent writer on the same file.
+- **Reads** load the whole file and parse it; for a personal assistant this is fine even across years of conversation.
+- **Backup** is just copying the directory.
 
-### Filesystem — everything else
+### Identity, behavior, memory, ephemeral
 
-Identity, behavior, memory, and ephemeral state are all plain files spread across the four domains:
+All plain files spread across the four domains:
 
 - **`config/SOUL.md`** — identity. The agent writes this on first run after asking the user for a name and personality. Read on every invocation.
 - **`config/cron/`** — instance-specific scheduled jobs.
 - **`config/tools/`, `config/skills/`, `config/channels/`** — instance-specific capability extensions.
 - **`memory/`** — granular files of long-term knowledge. The agent reads relevant files into context per invocation.
 - **`memory/journal/`** — daily scratch pad files (e.g., `memory/journal/2026-03-09.md`). The agent jots notes throughout the day; the consolidate-memories job promotes important items into the rest of `memory/`.
-- **`runtime/`** — `chat.sqlite`, `logs/`, `*.pid`.
+- **`runtime/`** — `threads/`, `logs/`, `*.pid`.
 
 ## First-run flow
 
@@ -162,7 +167,7 @@ The agent also creates `config/`, `memory/`, and `runtime/` directories on first
 
 ## Startup flow
 
-1. Initialize SQLite database (create `runtime/` and tables if needed)
+1. Ensure `runtime/` directory exists (`runtime/threads/` is created lazily on first message)
 2. Discover skills (scan `agent/skills/` and `config/skills/` for `SKILL.md` files; load names and descriptions; config overrides agent on name collision)
 3. Discover tools (scan `agent/tools/` and `config/tools/`; same merge rules)
 4. Register channels (scan `agent/channels/` and `config/channels/`; each checks for credentials and connects if present). If no channels connect, exit with an error.
@@ -240,7 +245,9 @@ memory/
 
 # Ephemeral — gitignored, never a repo
 runtime/
-  chat.sqlite
+  threads/            # one JSONL file per conversation
+    telegram/
+      12345.jsonl
   logs/
   *.pid
 ```
@@ -289,7 +296,7 @@ The same `memory/` repo can be shared across multiple machines running different
 - The **shell tool** runs commands using bash from the workspace root with a 1 MB output limit. The agent should confirm destructive commands with the user before running them.
 - **Never log credentials.** When catching errors, log only the error message — not full objects, which may contain API tokens or bot secrets.
 - Secrets live in `config/.env`.
-- The SQLite database in `runtime/` contains all your messages — protect it accordingly.
+- The thread files in `runtime/threads/` contain all your messages — protect that directory accordingly.
 
 ## Non-goals
 

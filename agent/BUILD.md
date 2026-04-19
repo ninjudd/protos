@@ -17,7 +17,6 @@ Don't worry about the assistant's name or personality — those are configured o
 
 - `ai` — **Vercel AI SDK**. Use the latest version. Provides `generateText` with built-in tool execution. Limit the number of tool-use steps to prevent runaway loops. Do not manually implement a tool loop.
 - `@ai-sdk/anthropic` — Anthropic provider for the AI SDK (default). Can be swapped for `@ai-sdk/openai`, `@ai-sdk/google`, etc.
-- `better-sqlite3` — SQLite driver
 - `js-yaml` — YAML parsing for cron frontmatter and skill frontmatter
 - `node-cron` — cron expression scheduling
 - `tsx` — TypeScript execution without a build step. The agent can modify its own source and restart to apply changes.
@@ -51,13 +50,21 @@ Channel-specific variables (including the owner's ID on that platform) are liste
 - Use `process.cwd()` for the workspace root path, not `import.meta.dirname` — tsx runs in CJS mode where `import.meta.dirname` is undefined. The wrapper script ensures the process runs with the workspace root as cwd.
 - Create `config/` if it doesn't exist (the agent should do this on first run, but the build can pre-create it). Create a `config/.env` template with the API key for the chosen provider, `AI_MODEL`, `PRIMARY_CHANNEL`, and any channel-specific variables. Leave secrets blank for the user to fill in.
 
-### 2. Set up the database
+### 2. Set up message storage
 
-SQLite stores **messages only**. Create a single table:
+No database. Each conversation is an append-only JSONL file at `runtime/threads/{channelId}/{conversationId}.jsonl`. Each line is one message:
 
-- **messages** — channelId, conversationId, role (`user` or `assistant`), text, timestamp
+```jsonl
+{"role":"user","text":"hi","timestamp":"2026-04-18T10:30:00.000Z"}
+{"role":"assistant","text":"hello!","timestamp":"2026-04-18T10:30:02.000Z"}
+```
 
-Store the database file at `runtime/chat.sqlite`. The initialization function should create the `runtime/` directory at runtime if it doesn't exist. Don't open the database connection at import time — initialize it in a function that `index.ts` calls at startup. Export functions for storing and retrieving messages and conversation history.
+Create a small module (e.g. `agent/src/threads.ts`) with two functions:
+
+- `appendMessage(channelId, conversationId, role, text, timestamp)` — ensure the parent directory exists, then append one JSON line with a trailing `\n`. Use `fs.promises.appendFile` (which creates the file if missing) or write a thin wrapper. Sanitize `channelId` and `conversationId` to safe path segments — reject anything with `/`, `..`, or other path-escape characters.
+- `getHistory(channelId, conversationId, limit)` — read the file (return empty if it doesn't exist), split on newlines, parse each line as JSON, drop empty/malformed lines, and return the last `limit` entries.
+
+The router serializes per-conversation, so `appendMessage` never has a concurrent writer on the same file. No locking needed.
 
 Everything else (memory, skills, cron, identity) lives on the filesystem in the appropriate domain — see `ARCHITECTURE.md`.
 
@@ -135,7 +142,7 @@ Add a CLI subcommand `agent/logos cron list` that prints the merged job table wi
 The entry point (`agent/src/index.ts`):
 
 1. Loads `config/.env` via dotenv
-2. Initializes the database
+2. Ensures `runtime/` exists
 3. Registers channels
 4. Starts the scheduler
 5. Logs that it's running
