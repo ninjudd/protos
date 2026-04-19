@@ -4,29 +4,36 @@
 
 Logos is a single-process personal AI assistant. Messages come in from messaging channels, get processed by an AI agent, and responses go back out through the same channels.
 
-The workspace is organized into four sibling domains, each with a distinct role and lifecycle:
+The workspace is organized into **five sibling domains**, each with a distinct role and lifecycle:
 
 ```
 logos/                # workspace root
-  agent/              # the engine — code, default capabilities, engine docs
-  config/             # behavior — identity, instance-specific tools/skills/cron
+  spec/               # the blueprint — ARCHITECTURE, BUILD, recipes, defaults
+  agent/              # generated implementation — code that the bootstrap produces
+  config/             # behavior — identity, instance overrides, .env
   memory/             # durable state — facts, preferences, journal
-  runtime/            # ephemeral state — db, logs, pid files
+  runtime/            # ephemeral state — message threads, logs, pid files
 ```
 
-Only the agent repo lives here. `config/`, `memory/`, and `runtime/` are sibling directories — gitignored by this repo, optionally backed by their own repos, never tracked here.
+Only `spec/` (and the workspace entry-point docs) is tracked by this repo. `agent/`, `config/`, `memory/`, and `runtime/` are sibling directories — gitignored here, optionally backed by their own repos (except `runtime/`, which is local-only).
 
-## The four domains
+## The five domains
 
-### `agent/` — the engine
+### `spec/` — the blueprint
 
-Everything the engine ships: source code, default capabilities (channels, tools, skills, cron jobs), engine documentation. Shared across all Logos users — what's in this directory is what every instance gets out of the box.
+The architecture documents (`ARCHITECTURE.md`, `BUILD.md`), channel recipes, bundled skills, and default cron jobs. Tracked by this repo. Shared across all Logos users — what's in `spec/` is what every instance gets out of the box.
 
-Read-only at runtime from the agent's perspective (the agent edits its own source via the `self-edit` skill, but treats `agent/` as engine code, not personal state).
+The running agent reads from `spec/` directly for skills and cron defaults. Spec updates take effect on the next agent restart — no copy step, no drift.
+
+### `agent/` — generated implementation
+
+The TypeScript code produced by the bootstrap: `index.ts`, `router.ts`, the channel implementation(s) the user chose, the built-in tool implementations, the wrapper script. Gitignored by this repo. Optionally a separate Git repo if you want to commit your specific implementation.
+
+The agent edits its own source under `agent/src/` via the `self-edit` skill.
 
 ### `config/` — behavior
 
-How this specific instance behaves: identity (`SOUL.md`), instance-specific tools/skills/channels, instance-specific cron jobs, environment variables. Per-user. Optionally a separate Git repo.
+How this specific instance behaves: identity (`SOUL.md`), instance-specific overrides for tools/skills/channels/cron, environment variables. Per-user. Optionally a separate Git repo.
 
 Behavior reads context, but context does not define behavior.
 
@@ -69,7 +76,7 @@ Channels are messaging platform integrations. Each channel:
 
 **Main chat:** The `PRIMARY_CHANNEL` environment variable names the channel used for the owner's main conversation (e.g., `telegram`). The scheduler sends replies to the owner's conversation on this channel.
 
-**Bundled vs. instance-specific:** Channel implementations ship in `agent/src/channels/` (one `.ts` file per channel, plus a colocated `.md` recipe). Users can add their own channels in `config/channels/`; the loader scans both directories at startup.
+**Recipes vs implementations:** Channel **recipes** (`.md` setup guides) live in `spec/channels/` — they describe how to build each channel. Channel **implementations** (`.ts` code) live in `agent/src/channels/` — only the channels the user chose to bootstrap have implementations. Users can add their own channels in `config/src/channels/`.
 
 ### 2. Router
 
@@ -95,19 +102,19 @@ The agent is the brain. It uses the Vercel AI SDK to receive a message + history
 - `remember(text)` — sugar for appending to today's journal at `memory/journal/{YYYY-MM-DD}.md`
 - `shell(cmd)` — run a shell command (1 MB output limit)
 
-Users can add their own tools in `config/tools/`; both directories are loaded at startup. The AI SDK handles tool execution loops natively — limit the number of steps to prevent runaway tool use.
+Users can add their own tools in `config/src/tools/`; both directories are loaded at startup. The AI SDK handles tool execution loops natively — limit the number of steps to prevent runaway tool use.
 
-**Skills** are markdown instruction files that teach the agent how to accomplish complex tasks using its tools. Bundled skills live in `agent/skills/`, instance-specific skills in `config/skills/`. Both directories are scanned at startup; on name collision, `config/` wins.
+**Skills** are markdown instruction files that teach the agent how to accomplish complex tasks using its tools. Bundled skills live in `spec/skills/`, instance-specific skills in `config/skills/`. Both directories are scanned at startup; on name collision, `config/` wins.
 
 **Identity** comes from `config/SOUL.md`, written on first run. The agent reads it on every invocation.
 
-**Long-term memory** comes from the `memory/` directory. The agent reads granular files (facts, preferences, summaries) into context as needed.
+**Long-term memory** comes from the `memory/` directory. The system prompt includes a manifest (name + summary) for every memory file; full content is fetched on demand via `find_memory` and `read_file`. See **Memory format** below.
 
 **Model-agnostic:** The default provider is Anthropic (Claude), but switching to OpenAI, Google, or any other provider is a one-line change.
 
 ### 4. Scheduler
 
-The scheduler runs cron jobs from two roots: `agent/cron/` (defaults shipped with the engine) and `config/cron/` (instance-specific jobs).
+The scheduler runs cron jobs from two roots: `spec/cron/` (defaults shipped with the spec) and `config/cron/` (instance-specific jobs).
 
 **One file per job.** Each job is a single `.md` file. The filename (minus extension) is the job name. Frontmatter holds the schedule and any options. The body holds the prompt sent to the agent when the job fires.
 
@@ -121,10 +128,10 @@ Check for unread messages that need follow-up. NO_REPLY if nothing to report.
 
 **Layering.** When a file with the same name appears in both roots, the merged job uses:
 
-- **Frontmatter:** config overrides agent (e.g., `schedule:` in config replaces agent's).
-- **Body:** agent first, then config appended. Lets you extend a default prompt without restating it.
+- **Frontmatter:** config overrides spec (e.g., `schedule:` in config replaces spec's).
+- **Body:** spec first, then config appended. Lets you extend a default prompt without restating it.
 
-To disable an agent default, drop a config file with the same name and `enabled: false` in frontmatter.
+To disable a spec default, drop a config file with the same name and `enabled: false` in frontmatter.
 
 There is no central registry. Adding a job means dropping a file. The merged view (with source annotations) is available via `agent/logos cron list`.
 
@@ -132,9 +139,11 @@ When a job fires, the scheduler looks up the primary channel and sends the merge
 
 ### 5. Self-modification
 
-The agent can edit its own source code via its shell tool. TypeScript runs directly with `tsx` — no build step. To apply code changes, the agent restarts itself using the `agent/logos restart` wrapper script.
+The agent can edit its own source code (`agent/src/`) via its shell tool. TypeScript runs directly with `tsx` — no build step. To apply code changes, the agent restarts itself using the `agent/logos restart` wrapper script.
 
 The wrapper type-checks the code (`tsc --noEmit`) before restarting. If the check fails, the restart is aborted and the old process keeps running. This prevents the agent from killing itself with a bad edit.
+
+`spec/` is not edited by the running agent. Spec changes are made by humans (or coding agents like Claude Code) and applied by re-bootstrapping or manually updating `agent/`.
 
 ## Storage
 
@@ -155,12 +164,13 @@ One JSONL file per conversation, at `runtime/threads/{channelId}/{conversationId
 
 ### Identity, behavior, memory, ephemeral
 
-All plain files spread across the four domains:
+All plain files spread across the domains:
 
 - **`config/SOUL.md`** — identity. The agent writes this on first run after asking the user for a name and personality. Read on every invocation.
-- **`config/cron/`** — instance-specific scheduled jobs.
-- **`config/tools/`, `config/skills/`, `config/channels/`** — instance-specific capability extensions.
-- **`memory/`** — granular markdown files of long-term knowledge. See **Memory format** below for conventions.
+- **`config/cron/`** — instance-specific scheduled jobs (markdown).
+- **`config/skills/`** — instance-specific skills (markdown, agentskills.io directory format).
+- **`config/src/channels/`, `config/src/tools/`** — instance-specific channel and tool implementations (TypeScript, with optional colocated `.md` recipes).
+- **`memory/`** — granular markdown files of long-term knowledge. See **Memory format** below.
 - **`memory/journal/`** — daily scratch pad files (e.g., `memory/journal/2026-03-09.md`). The agent jots notes throughout the day; the consolidate-memories job promotes important items into the rest of `memory/`.
 - **`memory/new/`** — inbox folder. The agent writes new notes here when there's no obvious folder yet (use `write_file` with `mode: "create"`). The consolidate-memories job sorts the inbox into appropriate folders.
 - **`runtime/`** — `threads/`, `logs/`, `*.pid`, `memory-graph.json` (backlink cache).
@@ -175,6 +185,7 @@ Memory files are standard markdown with optional YAML frontmatter. The format is
 ---
 created: 2026-04-18T10:30:00Z
 updated: 2026-04-18T11:00:00Z
+description: My coffee preferences
 tags: [coffee, preferences]
 aliases: [coffee-order, my-coffee]
 ---
@@ -185,7 +196,7 @@ favorite place, [[blue-bottle]].
 See also: ![[preferences/morning-routine]]
 ```
 
-- **Frontmatter** holds intrinsic metadata about the note. Standard keys (`tags`, `aliases`, `created`, `updated`) match Obsidian conventions. Engine-specific fields are namespaced — e.g., `logos.confidence`, `logos.source` — to avoid collision with Obsidian or its plugins.
+- **Frontmatter** holds intrinsic metadata about the note. Standard keys (`tags`, `aliases`, `created`, `updated`, `description`) match Obsidian conventions. Engine-specific fields are namespaced — e.g., `logos.confidence`, `logos.source` — to avoid collision with Obsidian or its plugins.
 - **Body** is markdown. Tasks (`- [ ]`) work with Obsidian's Tasks plugin.
 
 ### Linking
@@ -231,7 +242,7 @@ If `memory/` is opened as an Obsidian vault, Obsidian creates a `.obsidian/` dir
 On startup, the agent checks for `config/SOUL.md`. If it doesn't exist:
 
 1. The agent introduces itself as a blank Logos and asks the user for a name and personality.
-2. The agent writes `config/SOUL.md` with the chosen identity.
+2. The agent writes `config/SOUL.md` with the chosen identity (using `write_file` with `mode: "create"`).
 3. Subsequent startups read the populated file.
 
 The agent also creates `config/`, `memory/`, and `runtime/` directories on first run if they don't exist.
@@ -239,70 +250,74 @@ The agent also creates `config/`, `memory/`, and `runtime/` directories on first
 ## Startup flow
 
 1. Ensure `runtime/` directory exists (`runtime/threads/` is created lazily on first message)
-2. Discover skills (scan `agent/skills/` and `config/skills/` for `SKILL.md` files; load names and descriptions; config overrides agent on name collision)
-3. Discover tools (scan `agent/src/tools/` and `config/tools/`; same merge rules)
-4. Register channels (scan `agent/src/channels/` and `config/channels/`; each checks for credentials and connects if present). If no channels connect, exit with an error.
-5. Start the scheduler (scan `agent/cron/` and `config/cron/`; merge by filename per the layering rules above)
+2. Discover skills (scan `spec/skills/` and `config/skills/` for `SKILL.md` files; load names and descriptions; config overrides spec on name collision)
+3. Discover tools (scan `agent/src/tools/` and `config/src/tools/`; same merge rules)
+4. Register channels (scan `agent/src/channels/` and `config/src/channels/`; each checks for credentials and connects if present). If no channels connect, exit with an error.
+5. Start the scheduler (scan `spec/cron/` and `config/cron/`; merge by filename per the layering rules above)
 6. If `config/SOUL.md` doesn't exist, run first-run flow
 7. Begin processing incoming messages
 
 ## File structure
 
 ```
-# Workspace root — only these are tracked by the agent repo
+# Workspace root — only these are tracked by the spec repo
 README.md
 CLAUDE.md
 AGENTS.md
 .gitignore
-agent/
+spec/
 
-# Engine — tracked
-agent/
-  README.md           # optional engine README
+# Spec — tracked
+spec/
   ARCHITECTURE.md     # this file
   BUILD.md            # build instructions for coding agents
-  package.json
-  tsconfig.json
-  logos               # wrapper script (start/stop/restart/status)
-  src/                # all .ts code — recipes colocate inside, next to their .ts
-    index.ts          # entry point
-    router.ts
-    agent.ts
-    scheduler.ts
-    threads.ts
-    memory.ts
-    channels/         # implementation + recipe colocated
-      telegram.ts
-      telegram.md
-      whatsapp.ts
-      whatsapp.md
-      ...
-    tools/            # implementation + (optional) recipe colocated
-      read_file.ts
-      write_file.ts
-      edit_file.ts
-      find_memory.ts
-      remember.ts
-      shell.ts
-  skills/             # bundled skills (agentskills.io directory format) — markdown only
+  channels/           # channel recipes (markdown only)
+    telegram.md
+    whatsapp.md
+    ...
+  skills/             # bundled skills (agentskills.io directory format)
     self-edit/
       SKILL.md
     git/
       SKILL.md
     coding/
       SKILL.md
-  cron/               # default cron jobs — markdown only
+  cron/               # default cron jobs (markdown with frontmatter)
     heartbeat.md
     consolidate-memories.md
+
+# Generated implementation — gitignored, optionally a separate repo
+agent/
+  package.json
+  tsconfig.json
+  logos               # wrapper script (start/stop/restart/status)
+  src/
+    index.ts          # entry point
+    router.ts
+    agent.ts
+    scheduler.ts
+    threads.ts
+    memory.ts
+    channels/         # implementations only — recipes are in spec/channels/
+      telegram.ts     # only for channels the user chose
+      ...
+    tools/            # built-in tool implementations
+      read_file.ts
+      write_file.ts
+      edit_file.ts
+      find_memory.ts
+      remember.ts
+      shell.ts
 
 # Behavior — gitignored, optionally a separate repo
 config/
   SOUL.md             # written on first run
   .env                # secrets
-  cron/               # instance-specific or override jobs
-  skills/             # instance-specific skills
-  tools/              # instance-specific tools
-  channels/           # instance-specific channels
+  cron/               # instance-specific or override jobs (markdown)
+  skills/             # instance-specific skills (markdown)
+  src/                # instance-specific TypeScript code
+    channels/         # custom channel implementations + optional recipes
+    tools/            # custom tool implementations + optional recipes
 
 # Durable state — gitignored, optionally a separate repo
 memory/
@@ -322,25 +337,30 @@ runtime/
       12345.jsonl
   logs/
   *.pid
+  memory-graph.json   # backlink cache
 ```
 
 ## Capability layout
 
-Channels and tools follow the same convention: each capability is a `.ts` implementation file plus an optional colocated `.md` recipe sharing the same basename.
+Channels and tools each have **recipes** (markdown setup guides) and **implementations** (TypeScript code). The split:
 
-```
-agent/src/channels/telegram.ts    # implementation
-agent/src/channels/telegram.md    # recipe (library, env vars, setup, gotchas)
-```
+| | Recipes | Implementations |
+|---|---|---|
+| **Built-in** | `spec/channels/{name}.md` | `agent/src/channels/{name}.ts` |
+| **Custom (user)** | `config/src/channels/{name}.md` (optional) | `config/src/channels/{name}.ts` |
+
+Same pattern for tools (`spec/tools/`, `agent/src/tools/`, `config/src/tools/`) — though built-in tools generally don't need recipes since they're for engine-internal use.
 
 Rules:
 
 - **Filename = capability name.** No central registry. The loader scans the directory for `*.ts` files and registers each one.
-- **Colocation.** The `.md` recipe lives next to the `.ts` it documents. Recipes never name the implementation path explicitly — the path is determined by the recipe's own location.
-- **Recipe is optional.** Built-in tools like `read_file` don't need a recipe; user-facing capabilities like channels do, since they involve external setup.
-- **Two-root scan.** The loader scans both `agent/src/{capability}/` (bundled) and `config/{capability}/` (instance-specific). On name collision, `config/` wins — the user's version replaces the bundled one. Note the asymmetry: `agent/` has a `src/` (engineering scaffolding for build tooling and node_modules); `config/` does not (it's mixed-content user behavior with no build step).
+- **Two-root scan for implementations.** The loader scans both `agent/src/{capability}/` (built-in) and `config/src/{capability}/` (instance-specific). On name collision, `config/` wins.
+- **Recipes describe; implementations execute.** A recipe in `spec/channels/telegram.md` tells the bootstrap how to build `agent/src/channels/telegram.ts`. Recipes never name the implementation path explicitly — the path is determined by their own location.
+- **Custom additions can colocate freely.** A user adding a channel in `config/src/channels/` can put both `.ts` and optional `.md` there together — no separate spec/ recipe needed since they're authoring the implementation directly.
 
-Skills are different — they follow the [Agent Skills](https://agentskills.io) directory format (`{name}/SKILL.md`), not a flat file. Cron jobs are also different — pure markdown files with frontmatter, no `.ts` companion.
+Skills follow the [Agent Skills](https://agentskills.io) directory format (`{name}/SKILL.md`). Bundled skills live in `spec/skills/`, instance-specific skills in `config/skills/`. Both are pure markdown — no `.ts` companions. The loader scans both directories; config wins on collision.
+
+Cron jobs are pure markdown files with frontmatter (`spec/cron/`, `config/cron/`).
 
 ### Adding a channel
 
@@ -352,18 +372,21 @@ A channel's `.ts` file exports a `register` function that takes the router and r
 2. If not, returns nothing
 3. If yes, connects, starts forwarding owner messages to the router (ignoring all others), and returns
 
-The colocated recipe documents the library, environment variables, setup steps, and any gotchas.
+To add a built-in channel: write a recipe in `spec/channels/`, then re-bootstrap (the coding agent reads the recipe and produces `agent/src/channels/{name}.ts`).
+
+To add a custom channel without a spec: write `config/src/channels/{name}.ts` directly, optionally with a colocated `.md` recipe.
 
 ## Permissions model
 
 | Domain | Agent (running) | Coding agents (Claude/Codex) | Human |
 |--------|-----------------|------------------------------|-------|
+| `spec/` | read | read/write | read/write |
 | `agent/` | read + self-edit via skill | read/write | read/write |
 | `config/` | read/write | read/write | read/write |
 | `memory/` | read/write | read/write | read/write |
 | `runtime/` | read/write | read-only | read/write |
 
-Read `runtime/` to debug. Modify the source domains (`agent/`, `config/`, `memory/`) to fix.
+Read `runtime/` to debug. Modify the source domains (`spec/`, `agent/`, `config/`, `memory/`) to fix.
 
 ## Multi-machine model
 
@@ -394,4 +417,4 @@ These are intentionally left out. They may be added later.
 - **Multiple AI providers at once** — one provider per deployment
 - **Web UI or dashboard** — the messaging app is the interface
 - **Plugin system** — channels, tools, and skills are just files, not a formal plugin API
-- **Submodules** — `config/` and `memory/` are independent repos when promoted, never submodules
+- **Submodules** — `agent/`, `config/`, and `memory/` are independent repos when promoted, never submodules

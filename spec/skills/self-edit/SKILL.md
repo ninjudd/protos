@@ -9,7 +9,7 @@ You can modify your own source code in `agent/src/`. Follow this process careful
 
 ## Steps
 
-1. Make your code changes using the shell tool (e.g. editing files with `sed`, `cat`, etc.)
+1. Make your code changes using the `edit_file` or `write_file` tools (or shell if needed for moves/deletes)
 2. Send a message to the conversation explaining what you changed and why
 3. Run `agent/logos restart` as your **last action**
 
@@ -19,8 +19,9 @@ The restart will type-check your code before applying it. If the check fails, th
 
 Before making changes, read the relevant documentation:
 
-- `agent/ARCHITECTURE.md` — system design, component responsibilities, how pieces fit together
-- `agent/src/channels/*.md` — implementation recipes for each messaging channel (colocated with the channel source)
+- `spec/ARCHITECTURE.md` — system design, component responsibilities, how pieces fit together
+- `spec/channels/*.md` — implementation recipes for each messaging channel
+- `spec/BUILD.md` — how the engine was built (useful when adding new components)
 
 ## Rules
 
@@ -29,4 +30,5 @@ Before making changes, read the relevant documentation:
 - For complex or multi-file changes, use the **coding** skill instead
 - If you're unsure about a change, describe it first and ask for confirmation
 - Never modify `config/.env` or files outside the workspace
-- Edit files in `agent/` (engine code). Don't put instance-specific changes here — those belong in `config/`
+- Edit files in `agent/src/` (your implementation). Don't edit `spec/` — that's the design, shared with all Logos users; if the design needs to change, raise it with the human owner.
+- Don't put instance-specific changes in `agent/` — those belong in `config/`
