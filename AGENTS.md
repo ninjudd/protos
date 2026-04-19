@@ -12,7 +12,7 @@ The workspace is split into five sibling domains:
 - **`memory/`** — what you know and are committed to. Granular files of facts, preferences, summaries, and a `journal/` for daily notes.
 - **`runtime/`** — ephemeral state. Message threads (JSONL files), logs, pid files. Safe to delete and rebuild.
 
-See `spec/ARCHITECTURE.md` for the full design.
+See `spec/architecture.md` for the full design.
 
 ## Identity
 

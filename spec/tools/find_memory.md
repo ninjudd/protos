@@ -28,7 +28,7 @@ Look up a memory note by its name or alias (e.g. `coffee` or `people/justin`). R
 
 ## Behavior
 
-- See `ARCHITECTURE.md` → Memory format → Linking for the full resolution rules.
+- See `architecture.md` → Memory format → Linking for the full resolution rules.
 - Match on filename (without `.md`) OR `aliases:` list from frontmatter.
 - On multiple matches: shortest path wins, then alphabetical.
 - On no match: return `{ found: false }`. **Do not create any file.** Do not modify state.

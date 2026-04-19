@@ -58,8 +58,8 @@ The workspace is split into five sibling domains. Only `spec/` is tracked by thi
 # Tracked by this repo
 README.md, CLAUDE.md, AGENTS.md   # workspace entry-point docs
 spec/                             # the blueprint
-  ARCHITECTURE.md                 # system design
-  BUILD.md                        # build instructions for coding agents
+  architecture.md                 # system design
+  build.md                        # build instructions for coding agents
   channels/                       # channel recipes (markdown)
   skills/                         # bundled skills (markdown, agentskills.io format)
   cron/                           # default scheduled jobs (markdown)
@@ -73,7 +73,7 @@ runtime/                          # ephemeral state — threads, logs, pid files
 
 The repo is the **spec** — the design. The bootstrap reads `spec/` and generates `agent/`. Each user has their own `agent/`, `config/`, and `memory/`, optionally as their own Git repos.
 
-See [spec/ARCHITECTURE.md](spec/ARCHITECTURE.md) for the full system design.
+See [spec/architecture.md](spec/architecture.md) for the full system design.
 
 ## Principles
 

@@ -30,9 +30,9 @@ This assumes `agent/` is a Git repo. If it isn't, auto-revert won't work — the
 
 Before making changes, read the relevant documentation:
 
-- `spec/ARCHITECTURE.md` — system design, component responsibilities, how pieces fit together
+- `spec/architecture.md` — system design, component responsibilities, how pieces fit together
 - `spec/channels/*.md` — implementation recipes for each messaging channel
-- `spec/BUILD.md` — how the engine was built (useful when adding new components)
+- `spec/build.md` — how the engine was built (useful when adding new components)
 
 ## Rules
 

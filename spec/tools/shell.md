@@ -30,7 +30,7 @@ Output is truncated to 1 MB total (combined stdout + stderr). On truncation, app
 - **Async** — must not block the event loop. Use the promise wrapper or callback.
 - 1 MB output cap on combined stdout+stderr.
 - Exit code returned, never thrown — the model can interpret non-zero as needed.
-- **Spec-write nudge (always on):** the tool description always includes a note: `NOTE: spec/ is read-only at runtime. Do not modify files under spec/ via shell — instance-specific changes belong in config/.` The path-safety helper enforces this for `write_file`/`edit_file`, but `shell` can technically still bypass — this is a convention, not enforcement. For hard enforcement see BUILD.md → Sandboxing.
+- **Spec-write nudge (always on):** the tool description always includes a note: `NOTE: spec/ is read-only at runtime. Do not modify files under spec/ via shell — instance-specific changes belong in config/.` The path-safety helper enforces this for `write_file`/`edit_file`, but `shell` can technically still bypass — this is a convention, not enforcement. For hard enforcement see build.md → Sandboxing.
 - **Self-edit nudge:** when `LOGOS_SELF_EDIT=false`, the tool description (what the model sees) gets a second note appended: `NOTE: self-edit is disabled. Do not modify files under agent/.` Same convention-not-enforcement caveat applies.
 
 ## Dependencies

@@ -21,7 +21,7 @@ Only `spec/` (and the workspace entry-point docs) is tracked by this repo. `agen
 
 ### `spec/` — the blueprint
 
-The architecture documents (`ARCHITECTURE.md`, `BUILD.md`), channel recipes, bundled skills, and default cron jobs. Tracked by this repo. Shared across all Logos users — what's in `spec/` is what every instance gets out of the box.
+The architecture documents (`architecture.md`, `build.md`), channel recipes, bundled skills, and default cron jobs. Tracked by this repo. Shared across all Logos users — what's in `spec/` is what every instance gets out of the box.
 
 The running agent reads from `spec/` directly for skills and cron defaults. Spec updates take effect on the next agent restart — no copy step, no drift.
 
@@ -160,7 +160,7 @@ Do not return `null`, `undefined`, or `{ path: null }`. The shape above is the c
 
 **Long-term memory** comes from the `memory/` directory. The system prompt includes a manifest (name + summary) for every memory file; full content is fetched on demand via `find_memory` and `read_file`. See **Memory format** below.
 
-**Self-awareness.** The system prompt includes a fixed "How you operate" block that explains the agent's two invocation modes (user messages vs. scheduled cron jobs) and a list of active cron jobs (name + schedule + summary). Without this, the agent doesn't know cron exists and may tell the user it can't reach out proactively — which is wrong; cron heartbeats are exactly the proactive-outreach mechanism. See `BUILD.md` step 4 for the exact wording.
+**Self-awareness.** The system prompt includes a fixed "How you operate" block that explains the agent's two invocation modes (user messages vs. scheduled cron jobs) and a list of active cron jobs (name + schedule + summary). Without this, the agent doesn't know cron exists and may tell the user it can't reach out proactively — which is wrong; cron heartbeats are exactly the proactive-outreach mechanism. See `build.md` step 4 for the exact wording.
 
 **Model-agnostic:** The default provider is Anthropic (Claude), but switching to OpenAI, Google, or any other provider is a one-line change.
 
@@ -186,7 +186,7 @@ Sub-agents are not pre-defined as separate entities. There is no `spec/agents/` 
 - Sub-agents cannot spawn sub-agents. The runner strips `delegate_task` from the tool allowlist regardless of what the caller asks for. Single-level delegation, period.
 - The runner logs each invocation (skills, tools, model, duration, tokens) to `runtime/logs/` for operator visibility. Cost info is NOT surfaced to the calling agent.
 
-See `spec/tools/delegate_task.md` for the full tool contract and BUILD.md → step 4d for the runner implementation.
+See `spec/tools/delegate_task.md` for the full tool contract and build.md → step 4d for the runner implementation.
 
 ### 4. Scheduler
 
@@ -231,7 +231,7 @@ This closes the three failure modes for self-edit: compile errors (caught by typ
 - `write_file` and `edit_file` reject any path that resolves under `agent/` with a clear error.
 - The `shell` tool gets a warning appended to its description: "self-edit is disabled; do not modify files under `agent/`." This is a nudge, not enforcement — the shell tool can still technically write anywhere the process user can.
 
-This is **safety by convention plus tool guards** — enough to prevent accidental or unprompted self-edit. For guaranteed enforcement (e.g. against an adversarial or confused agent), run the process in a sandbox with `agent/` mounted read-only. See `BUILD.md` → Sandboxing for OS-specific notes.
+This is **safety by convention plus tool guards** — enough to prevent accidental or unprompted self-edit. For guaranteed enforcement (e.g. against an adversarial or confused agent), run the process in a sandbox with `agent/` mounted read-only. See `build.md` → Sandboxing for OS-specific notes.
 
 Default is `LOGOS_SELF_EDIT=true`. The capability exists and is well-guarded; users nervous about it flip one env var.
 
@@ -361,8 +361,8 @@ spec/
 
 # Spec — tracked
 spec/
-  ARCHITECTURE.md     # this file
-  BUILD.md            # build instructions for coding agents
+  architecture.md     # this file
+  build.md            # build instructions for coding agents
   channels/           # channel recipes (markdown only)
     telegram.md
     terminal.md       # local client-server chat over Unix socket
