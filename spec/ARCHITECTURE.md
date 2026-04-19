@@ -105,14 +105,18 @@ If the agent's response is the exact string `NO_REPLY`, the router discards it. 
 
 The agent is the brain. It uses the Vercel AI SDK to receive a message + history, decide how to respond, optionally use tools, and return a response.
 
-**Tools** are typed capabilities defined in code. The kernel ships six primitives in `agent/src/tools/`:
+**Tools** are typed capabilities defined in code. Each built-in tool has a recipe in `spec/tools/{name}.md` describing its inputs, outputs, behavior, and dependencies — same pattern as channels. Implementations live in `agent/src/tools/`.
+
+The kernel ships eight tools:
 
 - `read_file(path)` — read any file in the workspace
 - `write_file(path, content, mode)` — `create` (fail if exists), `append`, or `replace` (overwrite)
 - `edit_file(path, old_string, new_string)` — surgical find-and-replace; `old_string` must appear exactly once
-- `find_memory(name)` — resolve a wiki-link-style name (or alias) to a path. Returns `{ found: true, path, backlinks }` on hit or `{ found: false }` on miss (see [Tool return shapes](#tool-return-shapes)). **Does NOT lazy-create** — the agent decides whether and where to create a missing note via `write_file`.
-- `remember(text)` — sugar for appending to today's journal at `memory/journal/{YYYY-MM-DD}.md`
+- `find_memory(name)` — resolve a wiki-link-style name to a path. Returns `{ found: true, path, backlinks }` or `{ found: false }` (see [Tool return shapes](#tool-return-shapes)). Does NOT lazy-create.
+- `remember(text)` — sugar for appending to today's journal
 - `shell(cmd)` — run a shell command (1 MB output limit)
+- `delegate_task({ prompt, skills, tools, model? })` — spawn a sub-agent in an isolated context (see [Sub-agents](#sub-agents))
+- `web_fetch(url)` — fetch a URL and return content as markdown (see `spec/tools/web_fetch.md` for backend choice and privacy)
 
 Users can add their own tools directly in `agent/src/tools/` — same location as the built-in tools. The AI SDK handles tool execution loops natively — limit the number of steps to prevent runaway tool use.
 
@@ -140,6 +144,30 @@ Do not return `null`, `undefined`, or `{ path: null }`. The shape above is the c
 **Long-term memory** comes from the `memory/` directory. The system prompt includes a manifest (name + summary) for every memory file; full content is fetched on demand via `find_memory` and `read_file`. See **Memory format** below.
 
 **Model-agnostic:** The default provider is Anthropic (Claude), but switching to OpenAI, Google, or any other provider is a one-line change.
+
+#### Sub-agents
+
+The agent can spawn focused sub-agents via the `delegate_task` tool. A sub-agent is a separate `generateText` invocation with:
+
+- A task-specific prompt (written by the main agent at call time)
+- An explicit list of skills (full SKILL.md bodies inlined into its system prompt)
+- An explicit allowlist of tools (a subset of what the main agent has)
+- An isolated context — no SOUL.md, no memory manifest, no conversation history
+
+Sub-agents are not pre-defined as separate entities. There is no `spec/agents/` directory. The skills system already provides reusable behavior templates; `delegate_task` just lets the main agent compose them on demand into a focused sub-task. To make a sub-agent specialty reusable, write a regular skill in `spec/skills/{name}/`.
+
+**When to delegate:**
+
+- Tasks that require many tool calls or large intermediate outputs (web research, multi-file analysis)
+- Sub-tasks that benefit from a fresh focused context
+- Anything where intermediate data shouldn't pollute the main context
+
+**Constraints:**
+
+- Sub-agents cannot spawn sub-agents. The runner strips `delegate_task` from the tool allowlist regardless of what the caller asks for. Single-level delegation, period.
+- The runner logs each invocation (skills, tools, model, duration, tokens) to `runtime/logs/` for operator visibility. Cost info is NOT surfaced to the calling agent.
+
+See `spec/tools/delegate_task.md` for the full tool contract and BUILD.md → step 4d for the runner implementation.
 
 ### 4. Scheduler
 
@@ -321,6 +349,15 @@ spec/
     terminal.md       # local client-server chat over Unix socket
     whatsapp.md
     ...
+  tools/              # tool recipes (markdown only)
+    read_file.md
+    write_file.md
+    edit_file.md
+    find_memory.md
+    remember.md
+    shell.md
+    delegate_task.md  # sub-agent runner
+    web_fetch.md      # privacy-aware web fetch
   skills/             # bundled skills (agentskills.io directory format)
     self-edit/
       SKILL.md
@@ -358,6 +395,11 @@ agent/
       find_memory.ts
       remember.ts
       shell.ts
+      delegate_task.ts
+      web_fetch.ts
+      _paths.ts       # shared path-safety + self-edit-guard helper
+    agents/           # sub-agent runner (single generic file, no per-agent definitions)
+      runner.ts
 
 # Behavior — gitignored, optionally a separate repo. Markdown only — no code.
 config/
@@ -394,14 +436,14 @@ runtime/
 
 ## Capability layout
 
-Channels and tools are **code** — they live in `agent/src/`, which is the user's own implementation repo. Skills and cron are **behavior configuration** — markdown-only, layered between `spec/` (defaults) and `config/` (user overrides).
+Channels and tools are **code** — they live in `agent/src/`, which is the user's own implementation repo. Their recipes live in `spec/`. Skills and cron are **behavior configuration** — markdown-only, layered between `spec/` (defaults) and `config/` (user overrides).
 
-| | Code layout | Layered? |
-|---|---|---|
-| **Channels** | `agent/src/channels/{name}.ts` + colocated `{name}.md` | No — single root |
-| **Tools** | `agent/src/tools/{name}.ts` | No — single root |
-| **Skills** | `spec/skills/{name}/SKILL.md` (built-in) and `config/skills/{name}/SKILL.md` (user) | Yes — two-root, config wins |
-| **Cron** | `spec/cron/{name}.md` (default) and `config/cron/{name}.md` (override) | Yes — two-root, frontmatter override + body append |
+| | Recipes | Code | Layered? |
+|---|---|---|---|
+| **Channels** | `spec/channels/{name}.md` | `agent/src/channels/{name}.ts` | No — single code root |
+| **Tools** | `spec/tools/{name}.md` | `agent/src/tools/{name}.ts` | No — single code root |
+| **Skills** | `spec/skills/{name}/SKILL.md` (built-in) + `config/skills/{name}/SKILL.md` (user) | none | Yes — two-root, config wins |
+| **Cron** | `spec/cron/{name}.md` (default) + `config/cron/{name}.md` (override) | none | Yes — two-root, frontmatter override + body append |
 
 The asymmetry is intentional:
 

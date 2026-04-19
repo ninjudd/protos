@@ -38,8 +38,12 @@ At minimum:
 - `LOGOS_SELF_EDIT` — `true` (default) or `false`. When false, the `self-edit` skill is hidden and the file-edit tools refuse writes under `agent/`. See step 4c below for the enforcement details.
 - `LOGOS_TERMINAL` — `true` (default) or `false`. When false, the terminal channel doesn't bind the socket and `agent/logos chat` has no daemon to connect to.
 - `LOGOS_TERMINAL_SOCKET` — optional override for the terminal socket path. Defaults to `runtime/logos.sock`.
+- `LOGOS_WEB_FETCH` — `true` (default) or `false`. When false, the `web_fetch` tool refuses every call.
+- `LOGOS_WEB_FETCH_BACKEND` — `fetch` (default), `jina`, or `playwright`. See `spec/tools/web_fetch.md` for tradeoffs and privacy considerations.
+- `LOGOS_WEB_FETCH_TIMEOUT_MS` — optional, default `15000`.
+- `JINA_API_KEY` — optional; only consulted when backend is `jina`.
 
-Channel-specific variables (including the owner's ID on that platform) are listed in each channel recipe under `spec/channels/`.
+Channel-specific variables (including the owner's ID on that platform) are listed in each channel recipe under `spec/channels/`. Tool-specific variables are listed in each tool recipe under `spec/tools/`.
 
 ## Step-by-step
 
@@ -121,23 +125,27 @@ If `config/SOUL.md` doesn't exist when the agent assembles its system prompt:
 - After the user answers, the agent writes `config/SOUL.md`. Subsequent invocations read it normally.
 - Also ensure `config/`, `memory/`, and `runtime/` directories exist; create them if not.
 
-Six tools live in `agent/src/tools/`:
+Tools live in `agent/src/tools/`. Each built-in tool has a recipe in `spec/tools/{name}.md` describing its inputs, outputs, behavior, and dependencies. Implement one tool per recipe.
 
-- **read_file** `(path)` — read a file from the workspace. Takes a relative path, returns the file contents. Reject paths that escape the workspace root (e.g. `../` or absolute paths).
-- **write_file** `(path, content, mode)` — write to a file. Modes:
-  - `create` — fail if the file already exists
-  - `append` — append to the end (insert a `\n` separator if the existing file doesn't end with one)
-  - `replace` — overwrite the whole file
-- **edit_file** `(path, old_string, new_string)` — surgical find-and-replace. `old_string` must appear exactly once in the file, otherwise the call fails (forces the agent to add surrounding context for uniqueness). Cheaper than full rewrites for small updates.
-- **find_memory** `(name)` — resolve a wiki-link-style name (or alias) to a path under `memory/` using the link resolver (see step 4b). Returns a discriminated union — **never `null`**:
-  - On hit: `{ found: true, path: "memory/...", backlinks: ["memory/..."] }`
-  - On miss: `{ found: false }`
+Bundled tools to build:
 
-  The `found` boolean makes the shape unambiguous to the model and leaves room to add diagnostic fields (e.g. fuzzy-match suggestions) later. **Does not lazy-create.** When the agent wants a new note, it picks a path and uses `write_file` with `mode: "create"`.
-- **remember** `(text)` — sugar for appending to today's journal at `memory/journal/{YYYY-MM-DD}.md`. Equivalent to `write_file` with that path in `append` mode; kept as a separate tool because journaling is the most common write pattern.
-- **shell** `(cmd)` — run a shell command asynchronously using bash on the host (workspace root as cwd, 1 MB output limit). Don't block the event loop. The tool description should tell the agent to let the user know before running long commands, since the conversation pauses during execution.
+- `read_file` — see `spec/tools/read_file.md`
+- `write_file` — see `spec/tools/write_file.md`
+- `edit_file` — see `spec/tools/edit_file.md`
+- `find_memory` — see `spec/tools/find_memory.md`
+- `remember` — see `spec/tools/remember.md`
+- `shell` — see `spec/tools/shell.md`
+- `delegate_task` — see `spec/tools/delegate_task.md` (sub-agent runner)
+- `web_fetch` — see `spec/tools/web_fetch.md` (uses backend specified by `LOGOS_WEB_FETCH_BACKEND`)
 
-Custom tools are added by dropping `.ts` files directly into `agent/src/tools/` alongside the built-in ones. The loader scans that single directory.
+**Conventions all tools follow:**
+
+- **Path-safety helper** — share a single `agent/src/tools/_paths.ts` (or similar) used by `read_file`, `write_file`, `edit_file`, and any other path-taking tool. It resolves to absolute and rejects anything escaping the workspace root.
+- **Self-edit guards** — `write_file` and `edit_file` route through that helper; when `LOGOS_SELF_EDIT=false` and the resolved path is under `agent/`, throw `self-edit is disabled; refusing to write under agent/`. The `shell` tool gets a description nudge under the same env var.
+- **Discriminated unions for succeed-or-miss results** (see `find_memory`, `web_fetch`). Never return `null` from a tool. See `ARCHITECTURE.md` → Tool return shapes.
+- **Memory graph cache invalidation** — any tool that writes under `memory/` (`write_file`, `edit_file`, `remember`) must invalidate `runtime/memory-graph.json`.
+
+Custom tools are added by dropping `.ts` files directly into `agent/src/tools/` alongside the built-in ones. Loader scans that single directory. Custom tools that warrant documentation can have a colocated `.md` (same pattern as channels), but it's not required.
 
 #### 4b. Memory graph
 
@@ -171,6 +179,23 @@ When `LOGOS_SELF_EDIT=false`:
 - **`shell` tool description gets a nudge.** When disabled, the `shell` tool's description (what the model sees) includes: "NOTE: self-edit is disabled. Do not modify files under `agent/`." This is best-effort — shell can still technically write anywhere the process user can. Document this limitation in the tool description itself so the model knows it's convention, not enforcement.
 
 **These are application-level guards, not OS-level enforcement.** A determined agent with `shell` can bypass them. For guaranteed enforcement, sandbox the process — see the Sandboxing section at the end of this document.
+
+#### 4d. Sub-agent runner
+
+The `delegate_task` tool (see `spec/tools/delegate_task.md`) lets the main agent spawn a focused sub-agent in an isolated context. Implement the runner at `agent/src/agents/runner.ts`:
+
+- **`runSubAgent({ prompt, skills, tools, model })`** — single exported function.
+- **Resolve skills:** for each name in `skills`, find the matching `SKILL.md` (search `spec/skills/` then `config/skills/`; config wins on collision). Read the FULL body. Return `{ ok: false, error }` if any skill is missing.
+- **Resolve tools:** look up each tool name in the loaded tools map (the same map `agent.ts` builds for the main agent). **Always strip `delegate_task` from the resolved set** — sub-agents don't get to spawn sub-agents (single-level delegation, period). Return `{ ok: false, error }` if any other tool is missing.
+- **Build the system prompt:** concatenate, in order:
+  1. A framing line: `"You are a focused sub-agent invoked by the main Logos agent. Complete the task described in the user message and return your final response. You have no access to the main agent's identity, memory, or conversation history beyond what's stated below."`
+  2. Today's date.
+  3. The full body of each loaded skill (separated by blank lines).
+- **Call `generateText`** with the system prompt, the `prompt` argument as the user message, the resolved tool subset, the model from the argument or `AI_MODEL` env, and a step limit equal to the main agent's (e.g. `stepCountIs(25)` to start).
+- **Log the invocation** to `runtime/logs/` (or a sub-agents-specific logfile) with: timestamp, skills, tools, model, duration, token usage. Do NOT include the prompt or response text in the log (could contain sensitive content). Operator-only visibility.
+- **Return** `{ ok: true, response: text }` on success or `{ ok: false, error: message }` on any thrown error during resolution or execution.
+
+The sub-agent does **NOT** receive: SOUL.md, the memory manifest, recent journal entries, or the main agent's conversation history. Isolation is the point.
 
 ### 5. Build the channel registry
 
