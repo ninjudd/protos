@@ -52,5 +52,4 @@ Internal `agent/src/memory.ts` module.
 ## Implementation notes
 
 - Reuse the wiki-link parser the graph builder uses.
-- Atomic at the file-move level only. If link rewriting fails partway through, the file has already been moved; log which files were updated before the failure so the agent can finish manually.
 - `aliases:` frontmatter entries on other files are about names, not paths, and aren't affected by the move.

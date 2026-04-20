@@ -46,5 +46,4 @@ Internal `agent/src/memory.ts` module (graph + cache).
 ## Implementation notes
 
 - Reuse the wiki-link parser the graph builder uses — don't hand-roll regex that mishandles embeds (`![[...]]`) or aliases (`[[name|display]]`).
-- The rewrite is atomic at the file-create level only. If link rewriting fails partway through, the file has already been created; log which files were updated before the failure so the agent can finish manually.
-- For convenience, the agent may also call `write_file` with `mode: "create"` under `memory/` — but that bypasses the link-preservation step. Prefer `add_memory` for any memory-file creation that could shadow existing bare-name links.
+- The agent may also call `write_file` with `mode: "create"` under `memory/`, but that bypasses the link-preservation step. Prefer `add_memory` for any memory-file creation that could shadow existing bare-name links.
