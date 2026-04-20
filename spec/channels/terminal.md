@@ -132,18 +132,13 @@ The loop should feel like a normal chat: the user types a line, sees it rendered
 
 ### Thinking indicator (client)
 
-The indicator is just a **prompt swap**. No separate line, no animation, no "logos is thinking" text.
+The indicator is just a **prompt swap**. No separate line, no "logos is thinking" text.
 
 - Default prompt: `> `
-- While thinking: `… ` (single ellipsis character + space)
+- While thinking: a single animated character followed by a space (animation style is up to the client — keep it subtle)
 
-On `{"type": "thinking"}`:
+On `{"type": "thinking"}`: swap the prompt to the animated thinking indicator and redraw the prompt line (clear + redraw with the in-progress input preserved).
 
-- `rl.setPrompt("… ")` and redraw the prompt line (clear + redraw with `rl.line` preserved).
+On `{"type": "message", "role": "assistant"}` OR client-side ~60 s timeout: restore the default prompt and redraw. The timeout is a safety net for daemon crashes; under normal operation the indicator clears as soon as the assistant reply arrives. User-echo messages do NOT clear the indicator — otherwise it would vanish before the agent has had a chance to think.
 
-On `{"type": "message"}` (any role) OR client-side ~60 s timeout:
-
-- `rl.setPrompt("> ")` and redraw the prompt line.
-- The 60 s timeout is a safety net for daemon crashes; under normal operation the indicator clears as soon as the next `message` arrives.
-
-Only one indicator at a time per client; if a second `thinking` arrives while the prompt is already `… `, just reset the timeout.
+Only one indicator at a time per client; if a second `thinking` arrives while the indicator is already showing, just reset the timeout.
