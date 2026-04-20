@@ -112,7 +112,7 @@ The client formats assistant replies for terminal readability:
   - Fenced code blocks (```` ``` ````) → indented, colored if you like
   - Headings (`# Title`) → bold, optionally with a blank line before
   - Links `[text](url)` → show as `text (url)` or with underline on `text`
-- **User input and control messages** (your own lines, `> ` prompt, `[thinking]` indicators) are plain — no markdown parsing applied.
+- **User input and control messages** (your own lines, `❯ ` prompt, thinking indicator) are plain — no markdown parsing applied.
 - Keep it simple: small regex-based renderer, not a full markdown parser. Block-level features beyond code fences and headings can be passed through as-is.
 
 Re-render the *entire* assistant message after the wrapping pass — otherwise partial ANSI codes from one line can leak into the next.
@@ -121,20 +121,20 @@ Re-render the *entire* assistant message after the wrapping pass — otherwise p
 
 The loop should feel like a normal chat: the user types a line, sees it rendered in the transcript, the assistant replies, type the next line. All messages (user and assistant, live and replay) go through the **same render path** — the transcript is a canonical record of the conversation, regardless of which client sent what.
 
-- **Prompt:** `> ` (just the prompt character). This is what the user sees before typing.
-- **On Enter (before sending):** the user's typed line is visible on the prompt line (`> hello?`). The client then **clears that line** with an ANSI sequence (`\x1b[1A\r\x1b[2K` — cursor up one line, carriage return, clear line) so the line can be redrawn uniformly by the render path when the server echoes it back. Otherwise the same message appears twice — once as raw typed input, once as the rendered echo.
+- **Prompt:** `❯ ` (just the prompt character). This is what the user sees before typing.
+- **On Enter (before sending):** the user's typed line is visible on the prompt line (`❯ hello?`). The client then **clears that line** with an ANSI sequence (`\x1b[1A\r\x1b[2K` — cursor up one line, carriage return, clear line) so the line can be redrawn uniformly by the render path when the server echoes it back. Otherwise the same message appears twice — once as raw typed input, once as the rendered echo.
 - **Send to server** as `{type: "message", text: "..."}`.
 - **Server echoes via `fs.watch`:** the JSONL append triggers a broadcast; the client receives a `{type: "message", role: "user", ...}` event and renders it normally. Same render path as replay. This also means other connected clients see your message — cross-client visibility is free.
 - **Assistant reply arrives:** render the body wrapped with markdown applied.
-- **Async output collision:** readline may have the `> ` prompt drawn when an assistant message or another client's echo arrives. Before printing any async output, clear the current line (`readline.cursorTo(out, 0); readline.clearLine(out, 0);`), print the message, then `rl.prompt()` again. Otherwise the prompt and message smash onto the same line.
-- **Distinguishing speakers:** no `you:` / `logos:` labels. User messages are rendered with a highlighted background (a subtle ANSI background color spanning the visible width of each line) so they stand out from assistant replies. Assistant replies render plain. The input prompt (`> `) is visual, not a label; it never appears in the rendered transcript.
+- **Async output collision:** readline may have the `❯ ` prompt drawn when an assistant message or another client's echo arrives. Before printing any async output, clear the current line (`readline.cursorTo(out, 0); readline.clearLine(out, 0);`), print the message, then `rl.prompt()` again. Otherwise the prompt and message smash onto the same line.
+- **Distinguishing speakers:** no `you:` / `logos:` labels. User messages are rendered with the same `❯ ` prefix as the input prompt and a highlighted background (a subtle ANSI background color spanning the visible width of each line), with a blank line before and after for breathing room. Assistant replies render plain, no prefix or background.
 
 
 ### Thinking indicator (client)
 
 The indicator is just a **prompt swap**. No separate line, no "logos is thinking" text.
 
-- Default prompt: `> `
+- Default prompt: `❯ `
 - While thinking: a single animated character followed by a space (animation style is up to the client — keep it subtle)
 
 On `{"type": "thinking"}`: swap the prompt to the animated thinking indicator and redraw the prompt line (clear + redraw with the in-progress input preserved).
