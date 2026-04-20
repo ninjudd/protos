@@ -1,20 +1,25 @@
 ---
 name: update
-description: Check for spec updates and apply them via a coding agent.
+description: Check for spec updates, summarize them for the owner, and apply via a coding agent on approval.
 ---
 
 # Update
 
-When the owner asks you to "check for updates", "sync with spec", or similar, delegate the work to a coding agent. The running agent orchestrates; the coding agent does the diff and apply.
+When the owner asks you to "check for updates", "sync with spec", or similar, show them what's new in the spec and only delegate to a coding agent after they approve.
+
+The coding agent runs non-interactively (no human in its loop), so the review has to happen in the chat with the owner — before the coding agent runs.
 
 ## Steps
 
-1. **Confirm with the owner** that you should proceed. A spec update can touch many files in `agent/` — ask before running.
-2. **Delegate via the coding skill.** Use the **coding** skill to spawn Claude Code or Codex from the workspace root with the prompt `update agent`. That's the command defined in `AGENTS.md`; the coding agent pulls the latest `spec/`, diffs it against `agent/`, and follows `spec/build.md` → Updating to apply and commit the changes.
-3. **Report back.** Summarize what changed in `agent/`. If anything under `agent/src/` was touched, remind the owner to run `agent/protos restart` to pick up the changes.
+1. **Pull the spec.** `git -C spec pull` to fetch the latest.
+2. **Find the delta.** Use `git -C agent log -1 --format=%aI` to get the timestamp of the agent's last commit (the last sync point), then `git -C spec log --since="<that-timestamp>" --oneline` to list spec commits newer than that. If nothing comes back, tell the owner the spec is already current and stop.
+3. **Summarize for the owner.** List the new spec commits with their subject lines and a one-sentence description of what each changes (group by theme when helpful). Ask whether to proceed.
+4. **On approval, delegate via the coding skill.** Use the **coding** skill to spawn Claude Code or Codex from the workspace root with the prompt `update agent`. It follows `spec/build.md` → Updating: diffs the spec against `agent/`, applies the edits, and commits inside `agent/`.
+5. **Report completion.** Summarize what the coding agent committed (use `git -C agent show --stat HEAD`). Remind the owner to run `agent/protos restart` if `agent/src/` was touched.
 
 ## Rules
 
-- Don't attempt the diff or edits yourself. Spec syncs can span many files; the coding agent has the right tools.
-- Never touch `config/`, `memory/`, or `runtime/` — spec updates regenerate `agent/` only.
-- If the coding agent reports nothing to update, tell the owner that spec is already current.
+- Never skip the review step — the owner wants to see the spec delta before anything is applied.
+- Don't attempt the diff or edits yourself. Delegation is the point.
+- Never touch `config/`, `memory/`, or `runtime/`.
+- Never run `agent/protos restart` automatically — the owner decides when to pick up changes.
