@@ -26,7 +26,7 @@ On error: throws.
 
 - **Reject path escapes** (same helper as `read_file` / `write_file`).
 - **Spec-write guard (always on):** if the resolved path is under `spec/`, throw `spec/ is read-only at runtime; instance-specific changes belong in config/` (same rule as `write_file`).
-- **Self-edit guard:** when `LOGOS_SELF_EDIT=false` and the resolved path is under `agent/`, throw the same self-edit-disabled error.
+- **Self-edit guard:** when `PROTOS_SELF_EDIT=false` and the resolved path is under `agent/`, throw the same self-edit-disabled error.
 - **Read the file**, count occurrences of `old_string` in its content.
   - **Zero occurrences:** throw `old_string not found in {path}`.
   - **Two or more occurrences:** throw `old_string is not unique in {path} ({N} matches); add more surrounding context`.

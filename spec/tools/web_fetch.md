@@ -6,7 +6,7 @@ Fetch a URL and return its content as markdown.
 
 Fetch any URL and return its main content as markdown. Use this for reading articles, documentation, GitHub pages, blog posts, etc. For web search, fetch a search engine URL — DuckDuckGo's HTML version (`https://duckduckgo.com/html/?q=...`) works reliably without JavaScript.
 
-For JavaScript-heavy sites (single-page apps, Google search results), the default `fetch` backend may return mostly empty content. If that happens, the user can configure a JS-rendering backend (`LOGOS_WEB_FETCH_BACKEND=jina` or `playwright`) — see the recipe.
+For JavaScript-heavy sites (single-page apps, Google search results), the default `fetch` backend may return mostly empty content. If that happens, the user can configure a JS-rendering backend (`PROTOS_WEB_FETCH_BACKEND=jina` or `playwright`) — see the recipe.
 
 Heavy / repeated fetching is best done via `delegate_task` with this tool, so the raw page contents don't accumulate in the main context.
 
@@ -33,7 +33,7 @@ Heavy / repeated fetching is best done via `delegate_task` with this tool, so th
 
 ## Backends
 
-The recipe ships three backends, selectable via `LOGOS_WEB_FETCH_BACKEND`:
+The recipe ships three backends, selectable via `PROTOS_WEB_FETCH_BACKEND`:
 
 | Backend | Default? | JS-rendered | Local | Privacy | Setup |
 |---------|----------|-------------|-------|---------|-------|
@@ -80,10 +80,10 @@ The `playwright` backend is fully local — same privacy as `fetch`, with JS sup
 
 ## Environment variables
 
-- `LOGOS_WEB_FETCH` — `true` (default) or `false`. When false, the tool refuses every call with `web_fetch is disabled` and never appears as available.
-- `LOGOS_WEB_FETCH_BACKEND` — `fetch` (default) | `jina` | `playwright`.
+- `PROTOS_WEB_FETCH` — `true` (default) or `false`. When false, the tool refuses every call with `web_fetch is disabled` and never appears as available.
+- `PROTOS_WEB_FETCH_BACKEND` — `fetch` (default) | `jina` | `playwright`.
 - `JINA_API_KEY` — optional, only used when backend is `jina`.
-- `LOGOS_WEB_FETCH_TIMEOUT_MS` — optional, default 15000.
+- `PROTOS_WEB_FETCH_TIMEOUT_MS` — optional, default 15000.
 
 ## Behavior
 

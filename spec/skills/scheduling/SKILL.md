@@ -9,7 +9,7 @@ You can be invoked two ways: by a user message, or by a scheduled job firing. Wh
 
 ## Seeing current jobs
 
-Run `agent/logos cron` for a list, or read the files directly under `spec/cron/` (defaults) and `config/cron/` (overrides; config wins on name collision).
+Run `agent/protos cron` for a list, or read the files directly under `spec/cron/` (defaults) and `config/cron/` (overrides; config wins on name collision).
 
 ## Adding a new job
 

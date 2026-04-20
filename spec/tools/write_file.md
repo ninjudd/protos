@@ -29,8 +29,8 @@ On error: throws.
 ## Behavior
 
 - **Reject path escapes** (same helper as `read_file`).
-- **Spec-write guard (always on):** if the resolved path is under `spec/`, throw `spec/ is read-only at runtime; instance-specific changes belong in config/`. The spec is shared design across all Logos users; the running agent must not modify it. Spec changes happen via PR or via a coding agent operating outside the running daemon. The merge rules for cron and skills (config/ overlays spec/) are the supported way to extend or override defaults at runtime.
-- **Self-edit guard:** when `LOGOS_SELF_EDIT=false` and the resolved path is under `agent/`, throw `self-edit is disabled; refusing to write under agent/`.
+- **Spec-write guard (always on):** if the resolved path is under `spec/`, throw `spec/ is read-only at runtime; instance-specific changes belong in config/`. The spec is shared design across all Protos users; the running agent must not modify it. Spec changes happen via PR or via a coding agent operating outside the running daemon. The merge rules for cron and skills (config/ overlays spec/) are the supported way to extend or override defaults at runtime.
+- **Self-edit guard:** when `PROTOS_SELF_EDIT=false` and the resolved path is under `agent/`, throw `self-edit is disabled; refusing to write under agent/`.
 - **`create` mode:** use `fs.writeFile` with `{ flag: "wx" }`. Throw `File already exists: {path}` on `EEXIST`.
 - **`append` mode:** read existing content; if it has any content and doesn't end with `\n`, prepend `\n` before the new content so appends naturally separate. Then `fs.appendFile`. Tolerate `ENOENT` (treat as empty).
 - **`replace` mode:** plain `fs.writeFile`. Overwrites without warning.

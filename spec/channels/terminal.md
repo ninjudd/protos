@@ -1,6 +1,6 @@
 # Terminal
 
-A client-server chat channel. The daemon binds a Unix socket; `agent/logos chat` connects a client. Multiple clients can connect simultaneously, each tracking its own cursor into the conversation's JSONL file.
+A client-server chat channel. The daemon binds a Unix socket; `agent/protos chat` connects a client. Multiple clients can connect simultaneously, each tracking its own cursor into the conversation's JSONL file.
 
 ## Library
 
@@ -8,8 +8,8 @@ Node standard library only — `node:net`, `node:fs/promises`, `node:fs`, `node:
 
 ## Environment variables
 
-- `LOGOS_TERMINAL` — `true` (default) or `false`. When false, the channel skips registering and the socket isn't created. No other env vars required.
-- `LOGOS_TERMINAL_SOCKET` — optional override for the socket path. Defaults to `runtime/logos.sock`.
+- `PROTOS_TERMINAL` — `true` (default) or `false`. When false, the channel skips registering and the socket isn't created. No other env vars required.
+- `PROTOS_TERMINAL_SOCKET` — optional override for the socket path. Defaults to `runtime/protos.sock`.
 
 ## Channel identity
 
@@ -18,11 +18,11 @@ Node standard library only — `node:net`, `node:fs/promises`, `node:fs`, `node:
 
 ## Setup
 
-Zero setup. The channel is always generated during bootstrap. Start the daemon with `agent/logos start`, then connect with `agent/logos chat` from another terminal (or the same one, after backgrounding).
+Zero setup. The channel is always generated during bootstrap. Start the daemon with `agent/protos start`, then connect with `agent/protos chat` from another terminal (or the same one, after backgrounding).
 
 ## Client-server protocol
 
-Unix socket at `runtime/logos.sock`. Messages are newline-delimited JSON.
+Unix socket at `runtime/protos.sock`. Messages are newline-delimited JSON.
 
 **Client → server:**
 
@@ -36,7 +36,7 @@ Unix socket at `runtime/logos.sock`. Messages are newline-delimited JSON.
 ```
 {"type": "replay", "role": "user|assistant", "index": N, "text": "..."}
 {"type": "live-start"}                         # caught up; now streaming live
-{"type": "thinking"}                           # logos is processing — render an indicator
+{"type": "thinking"}                           # protos is processing — render an indicator
 {"type": "message", "role": "user|assistant", "index": N, "text": "..."}
 ```
 
@@ -66,7 +66,7 @@ The `index` carried on each emitted event is the JSONL line index of the last ev
 
 The client stores its cursor at `runtime/clients/{session}.cursor` (default session: `chat`). The default replay window on connect is computed as `from = min(stored_cursor, total - 20)` — show **at least the last 20 messages** for context, plus everything queued since the last disconnect if that span is longer. This means:
 
-- A fresh `agent/logos chat` in an existing conversation always shows recent context (not an empty screen).
+- A fresh `agent/protos chat` in an existing conversation always shows recent context (not an empty screen).
 - Messages queued while disconnected (e.g., cron firing overnight) are never skipped.
 - Whichever span is longer — "last 20" or "since cursor" — is the one you see.
 
@@ -74,7 +74,7 @@ The flags `--from-start`, `--last N`, and `--new` override this default.
 
 ## Owner filtering
 
-None needed. The socket lives in the workspace filesystem; only processes with filesystem access to `runtime/logos.sock` can connect. Document that the socket should not be exposed over the network.
+None needed. The socket lives in the workspace filesystem; only processes with filesystem access to `runtime/protos.sock` can connect. Document that the socket should not be exposed over the network.
 
 ## Implementation notes
 
@@ -96,20 +96,20 @@ When the channel receives a user message from a connected client and dispatches 
 Don't broadcast `thinking` for messages that arrive via channels other than this one (e.g., the user typing in Telegram while a terminal is connected) — only for messages this channel itself dispatched. Cron-originated messages also skip the indicator (no one is waiting).
 
 
-## Client (`agent/logos chat`)
+## Client (`agent/protos chat`)
 
 Lives at `agent/src/cli/chat.ts` — isolated from the rest of the codebase. Only imports `node:` standard library and the shared protocol types from `agent/src/channels/terminal-protocol.ts`. Does not import the router, agent, memory, or any other engine code. May additionally import thin npm packages for rendering (see below).
 
 Flags:
 
-- `agent/logos chat` — show at least the last 20 messages on connect (see [Cursor-based replay](#cursor-based-replay))
-- `agent/logos chat --from-start` — replay the entire conversation
-- `agent/logos chat --last N` — replay last N messages
-- `agent/logos chat --new` — advance cursor to end without replay (show only new messages from this point on)
+- `agent/protos chat` — show at least the last 20 messages on connect (see [Cursor-based replay](#cursor-based-replay))
+- `agent/protos chat --from-start` — replay the entire conversation
+- `agent/protos chat --last N` — replay last N messages
+- `agent/protos chat --new` — advance cursor to end without replay (show only new messages from this point on)
 
 Exit with `Ctrl+D`, `/quit`, or `/exit`. Client disconnect doesn't affect the daemon.
 
-If the daemon isn't running, `chat` fails fast with: `error: daemon not running. Start it with "agent/logos start".` Don't auto-start.
+If the daemon isn't running, `chat` fails fast with: `error: daemon not running. Start it with "agent/protos start".` Don't auto-start.
 
 ### Rendering
 
@@ -157,7 +157,7 @@ The loop should feel like a normal chat: the user types a line, sees it rendered
 
 ### Thinking indicator (client)
 
-The indicator is just a **prompt swap**. No separate line, no "logos is thinking" text.
+The indicator is just a **prompt swap**. No separate line, no "protos is thinking" text.
 
 - Default prompt: `❯ `
 - While thinking: a single animated character followed by a space (animation style is up to the client — keep it subtle)

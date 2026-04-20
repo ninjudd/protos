@@ -7,7 +7,7 @@
 ## Environment variables
 
 - `MATRIX_HOMESERVER` — homeserver URL (e.g. `https://matrix.org`)
-- `MATRIX_USER_ID` — bot's user ID (e.g. `@logos:matrix.org`)
+- `MATRIX_USER_ID` — bot's user ID (e.g. `@protos:matrix.org`)
 - `MATRIX_ACCESS_TOKEN` — access token for the bot account
 
 ## Setup

@@ -7,7 +7,7 @@ No npm library needed. Uses the [BlueBubbles](https://bluebubbles.app) server's 
 ## Prerequisites
 
 - A Mac with Messages.app signed into your Apple ID
-- BlueBubbles server installed and running on that Mac (can be the same machine running Logos)
+- BlueBubbles server installed and running on that Mac (can be the same machine running Protos)
 
 ## Environment variables
 

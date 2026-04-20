@@ -1,4 +1,4 @@
-# Logos
+# Protos
 
 A blueprint for personal AI assistants that build themselves.
 
@@ -6,18 +6,18 @@ A blueprint for personal AI assistants that build themselves.
 
 [OpenClaw](https://github.com/openclaw/openclaw) demonstrates that local AI assistants are incredibly useful. But it is also a large and complex system.
 
-Logos explores the opposite extreme. It lets you build a powerful assistant that is:
+Protos explores the opposite extreme. It lets you build a powerful assistant that is:
 
 - **simple enough to understand**
 - **built from readable files**
 - **local-first**
 - **entirely yours**
 
-Logos is an architecture specification — a set of documents precise enough that an AI coding agent can read them and generate a working personal assistant from scratch.
+Protos is an architecture specification — a set of documents precise enough that an AI coding agent can read them and generate a working personal assistant from scratch.
 
 ## How it works
 
-You don't install Logos. You point an AI coding agent at it and say:
+You don't install Protos. You point an AI coding agent at it and say:
 
 ```
 bootstrap <channel>
@@ -27,13 +27,13 @@ bootstrap <channel>
 
 More specifically:
 
-1. **Clone the repo** — `git clone https://github.com/ninjudd/logos.git`. No fork needed; your personal state lives in nested repos (`agent/`, `config/`, `memory/`) created during bootstrap, which are gitignored here.
+1. **Clone the repo** — `git clone https://github.com/ninjudd/protos.git`. No fork needed; your personal state lives in nested repos (`agent/`, `config/`, `memory/`) created during bootstrap, which are gitignored here.
 2. **Point your AI coding agent at it** (Claude Code, Codex, etc.)
 3. **Tell the agent:** `bootstrap telegram` (or whichever channel recipe under `spec/channels/` you prefer)
    - The coding agent reads `spec/` and generates the implementation in `agent/`. Approve its edits.
 4. **Fill in your API keys** in `config/.env`
-5. **Start it** — `agent/logos start`
-6. **Talk to it** — DM the bot on your chosen channel, or run `agent/logos chat` for a local terminal chat over a Unix socket (always available, no messaging platform setup required). On first run, the agent asks for a name and personality.
+5. **Start it** — `agent/protos start`
+6. **Talk to it** — DM the bot on your chosen channel, or run `agent/protos chat` for a local terminal chat over a Unix socket (always available, no messaging platform setup required). On first run, the agent asks for a name and personality.
 
 The repository contains no running code. It contains the spec. The coding agent reads the spec and generates the implementation.
 
@@ -45,7 +45,7 @@ When the spec evolves, sync your implementation the same way you bootstrapped it
 update agent
 ```
 
-The agent pulls the latest `spec/`, diffs it against your `agent/` tree, shows what would change, and applies the edits once you approve. Restart with `agent/logos restart` to pick them up.
+The agent pulls the latest `spec/`, diffs it against your `agent/` tree, shows what would change, and applies the edits once you approve. Restart with `agent/protos restart` to pick them up.
 
 Only `agent/` is regenerated. Your `config/`, `memory/`, and `runtime/` are left alone.
 

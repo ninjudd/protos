@@ -1,6 +1,6 @@
 # Build
 
-Step-by-step instructions for building Logos from the spec. Read `architecture.md` first — it defines the contracts this document tells you to implement.
+Step-by-step instructions for building Protos from the spec. Read `architecture.md` first — it defines the contracts this document tells you to implement.
 
 All paths in this document are **relative to the workspace root** (the directory that contains `spec/`, `agent/`, `config/`, etc.). Run all commands from there.
 
@@ -36,12 +36,12 @@ At minimum:
 - The API key for whichever AI provider you're using (e.g. `ANTHROPIC_API_KEY` for Anthropic)
 - `AI_MODEL` — model to use. Default to a sensible current model; don't pin exact version strings since model names change frequently.
 - `PRIMARY_CHANNEL` — the channel used for the owner's main conversation (e.g. `telegram`). The scheduler sends replies here.
-- `LOGOS_SELF_EDIT` — `true` (default) or `false`. See `architecture.md` → Self-modification for the toggle's effects.
-- `LOGOS_TERMINAL` — `true` (default) or `false`. When false, the terminal channel doesn't bind the socket and `agent/logos chat` has no daemon to connect to.
-- `LOGOS_TERMINAL_SOCKET` — optional override for the terminal socket path. Defaults to `runtime/logos.sock`.
-- `LOGOS_WEB_FETCH` — `true` (default) or `false`. When false, the `web_fetch` tool refuses every call.
-- `LOGOS_WEB_FETCH_BACKEND` — `fetch` (default), `jina`, or `playwright`. See `spec/tools/web_fetch.md` for tradeoffs and privacy considerations.
-- `LOGOS_WEB_FETCH_TIMEOUT_MS` — optional, default `15000`.
+- `PROTOS_SELF_EDIT` — `true` (default) or `false`. See `architecture.md` → Self-modification for the toggle's effects.
+- `PROTOS_TERMINAL` — `true` (default) or `false`. When false, the terminal channel doesn't bind the socket and `agent/protos chat` has no daemon to connect to.
+- `PROTOS_TERMINAL_SOCKET` — optional override for the terminal socket path. Defaults to `runtime/protos.sock`.
+- `PROTOS_WEB_FETCH` — `true` (default) or `false`. When false, the `web_fetch` tool refuses every call.
+- `PROTOS_WEB_FETCH_BACKEND` — `fetch` (default), `jina`, or `playwright`. See `spec/tools/web_fetch.md` for tradeoffs and privacy considerations.
+- `PROTOS_WEB_FETCH_TIMEOUT_MS` — optional, default `15000`.
 - `JINA_API_KEY` — optional; only consulted when backend is `jina`.
 
 Channel-specific variables (including the owner's ID on that platform) are listed in each channel recipe under `spec/channels/`. Tool-specific variables are listed in each tool recipe under `spec/tools/`.
@@ -126,7 +126,7 @@ The system prompt is concatenated from these sections, in order:
 
 If `config/SOUL.md` doesn't exist when the agent assembles its system prompt:
 
-- Use a minimal bootstrap system prompt: "You are a new personal AI assistant named Logos. You haven't been configured yet. On your next reply, introduce yourself and ask the user (1) what to call yourself and (2) how you should act — personality, tone, style. Once they answer, use `write_file` with `mode: \"create\"` to create `config/SOUL.md` with the chosen name and personality. Nothing else belongs in that file — memory, skills, and other context are loaded separately."
+- Use a minimal bootstrap system prompt: "You are a new personal AI assistant named Protos. You haven't been configured yet. On your next reply, introduce yourself and ask the user (1) what to call yourself and (2) how you should act — personality, tone, style. Once they answer, use `write_file` with `mode: \"create\"` to create `config/SOUL.md` with the chosen name and personality. Nothing else belongs in that file — memory, skills, and other context are loaded separately."
 - After the user answers, the agent writes `config/SOUL.md`. Subsequent invocations read it normally.
 - Also ensure `config/`, `memory/`, and `runtime/` directories exist; create them if not.
 
@@ -166,14 +166,14 @@ Skills loader: scan both `spec/skills/` and `config/skills/` for directories con
 
 #### 4c. Self-edit enforcement
 
-Read `LOGOS_SELF_EDIT` once at startup and thread the boolean through the tool loader and skills loader. Behavior is defined in `architecture.md` → Self-modification.
+Read `PROTOS_SELF_EDIT` once at startup and thread the boolean through the tool loader and skills loader. Behavior is defined in `architecture.md` → Self-modification.
 
 What you must implement:
 
-- **Always-on `spec/` write guard** in the paths helper: any path under `{workspace}/spec/` throws `spec/ is read-only at runtime; instance-specific changes belong in config/`. Independent of `LOGOS_SELF_EDIT`.
-- **Conditional `agent/` write guard** when `LOGOS_SELF_EDIT=false`: paths under `{workspace}/agent/` throw `self-edit is disabled; refusing to write under agent/`.
-- **Skills loader filter** when `LOGOS_SELF_EDIT=false`: skip the `self-edit` directory in `spec/skills/` so the skill is hidden from the agent's prompt.
-- **Shell tool description nudges**: always include the `spec/` warning; conditionally append the `agent/` warning when `LOGOS_SELF_EDIT=false`. These are conventions, not enforcement.
+- **Always-on `spec/` write guard** in the paths helper: any path under `{workspace}/spec/` throws `spec/ is read-only at runtime; instance-specific changes belong in config/`. Independent of `PROTOS_SELF_EDIT`.
+- **Conditional `agent/` write guard** when `PROTOS_SELF_EDIT=false`: paths under `{workspace}/agent/` throw `self-edit is disabled; refusing to write under agent/`.
+- **Skills loader filter** when `PROTOS_SELF_EDIT=false`: skip the `self-edit` directory in `spec/skills/` so the skill is hidden from the agent's prompt.
+- **Shell tool description nudges**: always include the `spec/` warning; conditionally append the `agent/` warning when `PROTOS_SELF_EDIT=false`. These are conventions, not enforcement.
 
 #### 4d. Sub-agent runner
 
@@ -194,7 +194,7 @@ Behavior:
 
 Framing line for the system prompt:
 
-> "You are a focused sub-agent invoked by the main Logos agent. Complete the task described in the user message and return your final response. You have no access to the main agent's identity, memory, or conversation history beyond what's stated below."
+> "You are a focused sub-agent invoked by the main Protos agent. Complete the task described in the user message and return your final response. You have no access to the main agent's identity, memory, or conversation history beyond what's stated below."
 
 ### 5. Build the channel registry
 
@@ -211,9 +211,9 @@ Read the recipe at `spec/channels/{name}.md` and follow its setup instructions. 
 
 ### 6b. Build the terminal channel (always included)
 
-Terminal is a zero-dependency, bundled channel shipped with every bootstrap. Follow `spec/channels/terminal.md` for the protocol, replay semantics, and rendering rules. Implementation lives at `agent/src/channels/terminal.ts` (server) and `agent/src/cli/chat.ts` (client). Wired into the wrapper as `agent/logos chat` (see step 9).
+Terminal is a zero-dependency, bundled channel shipped with every bootstrap. Follow `spec/channels/terminal.md` for the protocol, replay semantics, and rendering rules. Implementation lives at `agent/src/channels/terminal.ts` (server) and `agent/src/cli/chat.ts` (client). Wired into the wrapper as `agent/protos chat` (see step 9).
 
-The `LOGOS_TERMINAL=false` env var disables the channel: the server doesn't bind the socket, and the channel registry skips it.
+The `PROTOS_TERMINAL=false` env var disables the channel: the server doesn't bind the socket, and the channel registry skips it.
 
 ### 7. Build the scheduler
 
@@ -228,7 +228,7 @@ Implement `agent/src/scheduler.ts`. Cron format, merge rules, the merged-job tab
    4. Append the cron reminder (see `architecture.md` → Scheduler) to the merged body. Then dispatch through the router as a synthetic message. Pass the cron log file handle so the router can append each agent/tool event to it.
    5. After the agent returns, append a `cron_end` audit event (reply text, `duration_ms`, timestamp).
 - **Honor the `history:` frontmatter field** (default `primary`). The field controls only what the agent **reads** as context: `primary` reads recent primary-thread events; `none` runs with only the synthetic prompt. **Writes are the same in both cases**: the full event stream goes to the cron log; only the final assistant reply goes to the user thread (skipped on `NO_REPLY`). The synthetic prompt and intermediate steps are NOT written to the user thread.
-- Add a CLI subcommand `agent/logos cron` that prints the merged job table with source annotations (`[spec]`, `[config]`, `[spec → overridden by config]`, `[disabled]`).
+- Add a CLI subcommand `agent/protos cron` that prints the merged job table with source annotations (`[spec]`, `[config]`, `[spec → overridden by config]`, `[disabled]`).
 
 ### 8. Wire it all together
 
@@ -242,22 +242,22 @@ The entry point (`agent/src/index.ts`):
 
 That's it. No HTTP server needed unless a channel requires a webhook.
 
-### 9. Create the `agent/logos` wrapper script
+### 9. Create the `agent/protos` wrapper script
 
-Create a bash script at `agent/logos` that supports:
+Create a bash script at `agent/protos` that supports:
 
-- `agent/logos` or `agent/logos start` — start the process in the background
-- `agent/logos stop` — stop it
-- `agent/logos restart` — restart it (with safe-restart protocol below)
-- `agent/logos status` — check if it's running
-- `agent/logos cron` — show the merged cron job table
-- `agent/logos chat [flags]` — connect a terminal client to the running daemon (see step 6b). Passes flags through to `npx tsx agent/src/cli/chat.ts`. Fails fast with "daemon not running; start it with `agent/logos start`" if the daemon PID isn't alive.
+- `agent/protos` or `agent/protos start` — start the process in the background
+- `agent/protos stop` — stop it
+- `agent/protos restart` — restart it (with safe-restart protocol below)
+- `agent/protos status` — check if it's running
+- `agent/protos cron` — show the merged cron job table
+- `agent/protos chat [flags]` — connect a terminal client to the running daemon (see step 6b). Passes flags through to `npx tsx agent/src/cli/chat.ts`. Fails fast with "daemon not running; start it with `agent/protos start`" if the daemon PID isn't alive.
 
 The script must be invoked from the workspace root (the parent of `agent/`). It should `cd` to the workspace root if invoked from elsewhere by resolving its own location.
 
 Run the process with `npx tsx agent/src/index.ts` (not compiled JS). This way the agent can modify its own TypeScript source and restart to apply changes — no build step needed.
 
-Use a PID file at `runtime/logos.pid` and write logs to `runtime/logs/`. Both are gitignored. Append to the log file — don't truncate it on restart.
+Use a PID file at `runtime/protos.pid` and write logs to `runtime/logs/`. Both are gitignored. Append to the log file — don't truncate it on restart.
 
 **`stop` must kill the entire process tree, not just the PID file's PID.** `npx tsx agent/src/index.ts` produces a multi-process tree (npm wrapper + tsx node child). If `stop` only kills the root PID, the children get re-parented to init and survive — invisible to the wrapper, still polling channels, still firing scheduled jobs. Each `restart` then leaks a zombie daemon. The wrapper must walk the process tree (e.g. via `pgrep -P` recursive descent — available on both macOS and Linux) and signal every descendant. Send SIGTERM first, give the tree a few seconds to shut down gracefully, then SIGKILL anything still alive.
 
@@ -268,7 +268,7 @@ Use a PID file at `runtime/logos.pid` and write logs to `runtime/logs/`. Both ar
 3. **Stop the old process** (if running) and **start the new one** in the background.
 4. **Health check.** Wait a few seconds (e.g. 5s) and check if the new PID is still alive. If dead:
    - Print the last ~30 lines of the log so the user can see what crashed.
-   - If `agent/` is a Git repo and HEAD has moved since the snapshot: run `git -C agent reset --hard <snapshot-sha>` to revert the self-edit, then start the process again with the pre-edit code. Log the auto-revert clearly (`[logos] post-start check failed; auto-reverted agent to <sha> and restarted`).
+   - If `agent/` is a Git repo and HEAD has moved since the snapshot: run `git -C agent reset --hard <snapshot-sha>` to revert the self-edit, then start the process again with the pre-edit code. Log the auto-revert clearly (`[protos] post-start check failed; auto-reverted agent to <sha> and restarted`).
    - If no Git repo or HEAD is unchanged: leave the process stopped and tell the user to investigate.
 
 Auto-revert only affects commits the agent itself made between the snapshot and the failed restart. Changes in `config/` or `memory/` are not part of self-edit.
@@ -278,12 +278,12 @@ Auto-revert only affects commits the agent itself made between the snapshot and 
 Verify the build before handing it off:
 
 - `tsc --noEmit` (against `agent/tsconfig.json`) passes with no errors
-- `agent/logos start` with blank credentials fails and shows the error in the terminal
-- `agent/logos start` with blank credentials then `agent/logos status` reports not running
+- `agent/protos start` with blank credentials fails and shows the error in the terminal
+- `agent/protos start` with blank credentials then `agent/protos status` reports not running
 - `config/SOUL.md` does not exist yet (it's written on first run, not by the build)
 - `spec/cron/heartbeat.md`, `spec/cron/nap.md`, and `spec/cron/dream.md` are unchanged
 - `spec/` is untouched by the build (the bootstrap only writes to `agent/` and optionally creates `config/`)
-- The wrapper script is executable (`chmod +x agent/logos`)
+- The wrapper script is executable (`chmod +x agent/protos`)
 - `git -C agent log --oneline` shows at least one commit (the `bootstrap` anchor — critical for safe-restart auto-revert)
 - `git -C agent status` is clean (no uncommitted changes)
 - `git -C config log --oneline` shows at least one commit; `config/.env` is NOT in the commit

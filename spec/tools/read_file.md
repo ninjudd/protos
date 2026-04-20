@@ -33,4 +33,4 @@ Node standard library (`node:fs/promises`).
 ## Implementation notes
 
 - Use the shared `agent/src/paths.ts` helper for path resolution.
-- This tool does NOT participate in the `LOGOS_SELF_EDIT` guard — it's read-only.
+- This tool does NOT participate in the `PROTOS_SELF_EDIT` guard — it's read-only.

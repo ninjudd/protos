@@ -31,7 +31,7 @@ Output is truncated to 1 MB total (combined stdout + stderr). On truncation, app
 - 1 MB output cap on combined stdout+stderr.
 - Exit code returned, never thrown — the model can interpret non-zero as needed.
 - **Spec-write nudge (always on):** the tool description always includes a note: `NOTE: spec/ is read-only at runtime. Do not modify files under spec/ via shell — instance-specific changes belong in config/.` The `paths.ts` helper enforces this for `write_file`/`edit_file`, but `shell` can technically still bypass — this is a convention, not enforcement. Hard enforcement requires running the process in an OS-level sandbox.
-- **Self-edit nudge:** when `LOGOS_SELF_EDIT=false`, the tool description (what the model sees) gets a second note appended: `NOTE: self-edit is disabled. Do not modify files under agent/.` Same convention-not-enforcement caveat applies.
+- **Self-edit nudge:** when `PROTOS_SELF_EDIT=false`, the tool description (what the model sees) gets a second note appended: `NOTE: self-edit is disabled. Do not modify files under agent/.` Same convention-not-enforcement caveat applies.
 
 ## Dependencies
 

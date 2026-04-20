@@ -41,7 +41,7 @@ The runner (in `agent/src/agents/runner.ts`):
 1. **Resolve skills.** For each name in `skills`, find the SKILL.md (search `spec/skills/` then `config/skills/`, config wins on collision). Read the full body. If any skill is missing, return `{ ok: false, error: "skill not found: {name}" }`.
 2. **Resolve tools.** For each name in `tools`, fetch the tool definition from the loaded tools map. If any tool is missing, return `{ ok: false, error: "tool not found: {name}" }`.
 3. **Build the sub-agent system prompt:**
-   - A short framing line: "You are a focused sub-agent invoked by the main Logos agent. Complete the task and return your final response. You have no access to the main agent's identity, memory, or conversation history beyond what's stated below."
+   - A short framing line: "You are a focused sub-agent invoked by the main Protos agent. Complete the task and return your final response. You have no access to the main agent's identity, memory, or conversation history beyond what's stated below."
    - Today's date.
    - For each skill, the full SKILL.md body (frontmatter optional — body is what matters).
    - **Not included:** SOUL.md, memory manifest, recent journal, conversation history.

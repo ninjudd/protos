@@ -2,12 +2,12 @@
 
 ## Overview
 
-Logos is a single-process personal AI assistant. Messages come in from messaging channels, get processed by an AI agent, and responses go back out through the same channels.
+Protos is a single-process personal AI assistant. Messages come in from messaging channels, get processed by an AI agent, and responses go back out through the same channels.
 
 The workspace is organized into **five sibling domains**, each with a distinct role and lifecycle:
 
 ```
-logos/                # workspace root
+protos/                # workspace root
   spec/               # the blueprint — architecture, build, recipes, defaults
   agent/              # generated implementation — code that the bootstrap produces
   config/             # behavior — identity, instance overrides, .env
@@ -21,7 +21,7 @@ Only `spec/` (and the workspace entry-point docs) is tracked by this repo. `agen
 
 ### `spec/` — the blueprint
 
-The architecture documents (`architecture.md`, `build.md`), channel recipes, bundled skills, and default cron jobs. Tracked by this repo. Shared across all Logos users — what's in `spec/` is what every instance gets out of the box.
+The architecture documents (`architecture.md`, `build.md`), channel recipes, bundled skills, and default cron jobs. Tracked by this repo. Shared across all Protos users — what's in `spec/` is what every instance gets out of the box.
 
 The running agent reads from `spec/` directly for skills and cron defaults. Spec updates take effect on the next agent restart — no copy step, no drift.
 
@@ -221,7 +221,7 @@ Frontmatter fields:
 
 To disable a spec default, drop a config file with the same name and `enabled: false` in frontmatter.
 
-There is no central registry. Adding a job means dropping a file. The merged view (with source annotations) is available via `agent/logos cron`.
+There is no central registry. Adding a job means dropping a file. The merged view (with source annotations) is available via `agent/protos cron`.
 
 When a job fires, the scheduler looks up the primary channel and sends the merged prompt to the agent through the router as a synthetic message addressed to the owner's main conversation. A reminder is appended: "If you have nothing to say to the owner, respond with exactly NO_REPLY and nothing else."
 
@@ -243,7 +243,7 @@ In both cases, intermediate events (multi-step assistant text, tool calls, tool 
 
 ### 5. Self-modification
 
-The agent can edit its own source code (`agent/src/`) via its file-edit tools (`write_file`, `edit_file`). TypeScript runs directly with `tsx` — no build step. To apply code changes, the agent restarts itself using the `agent/logos restart` wrapper script.
+The agent can edit its own source code (`agent/src/`) via its file-edit tools (`write_file`, `edit_file`). TypeScript runs directly with `tsx` — no build step. To apply code changes, the agent restarts itself using the `agent/protos restart` wrapper script.
 
 **Safe-edit protocol:**
 
@@ -253,7 +253,7 @@ The agent can edit its own source code (`agent/src/`) via its file-edit tools (`
 
 This closes the three failure modes for self-edit: compile errors (caught by typecheck), runtime startup errors (caught by post-start health check + auto-revert), and subtle logic bugs (can be manually reverted via `git` from the running agent).
 
-**Disabling self-edit:** set `LOGOS_SELF_EDIT=false` in `config/.env`. When disabled:
+**Disabling self-edit:** set `PROTOS_SELF_EDIT=false` in `config/.env`. When disabled:
 
 - The `self-edit` skill is hidden from the agent (skills loader skips it).
 - `write_file` and `edit_file` reject any path that resolves under `agent/` with a clear error.
@@ -261,7 +261,7 @@ This closes the three failure modes for self-edit: compile errors (caught by typ
 
 This is **safety by convention plus tool guards** — enough to prevent accidental or unprompted self-edit. For guaranteed enforcement (e.g. against an adversarial or confused agent), run the process in an OS-level sandbox with `agent/` and `spec/` mounted read-only.
 
-Default is `LOGOS_SELF_EDIT=true`. The capability exists and is well-guarded; users nervous about it flip one env var.
+Default is `PROTOS_SELF_EDIT=true`. The capability exists and is well-guarded; users nervous about it flip one env var.
 
 `spec/` is not edited by the running agent. Spec changes are made by humans (or coding agents like Claude Code) and applied by asking a coding agent to update `agent/` to match.
 
@@ -350,7 +350,7 @@ favorite place, [[blue-bottle]].
 See also: ![[preferences/morning-routine]]
 ```
 
-- **Frontmatter** holds intrinsic metadata about the note. Standard keys (`tags`, `aliases`, `created`, `updated`, `description`) match Obsidian conventions. Engine-specific fields are namespaced — e.g., `logos.confidence`, `logos.source` — to avoid collision with Obsidian or its plugins.
+- **Frontmatter** holds intrinsic metadata about the note. Standard keys (`tags`, `aliases`, `created`, `updated`, `description`) match Obsidian conventions. Engine-specific fields are namespaced — e.g., `protos.confidence`, `protos.source` — to avoid collision with Obsidian or its plugins.
 - **Body** is markdown. Tasks (`- [ ]`) work with Obsidian's Tasks plugin.
 
 ### Linking
@@ -416,7 +416,7 @@ Both jobs run with `history: none`: the agent's context for the invocation start
 
 On startup, the agent checks for `config/SOUL.md`. If it doesn't exist:
 
-1. The agent introduces itself as a blank Logos and asks the user for a name and personality.
+1. The agent introduces itself as a blank Protos and asks the user for a name and personality.
 2. The agent writes `config/SOUL.md` with the chosen identity (using `write_file` with `mode: "create"`).
 3. Subsequent startups read the populated file.
 
@@ -491,7 +491,7 @@ spec/
 agent/
   package.json
   tsconfig.json
-  logos               # wrapper script (start/stop/restart/status/chat)
+  protos               # wrapper script (start/stop/restart/status/chat)
   src/
     index.ts          # entry point
     router.ts
@@ -500,7 +500,7 @@ agent/
     threads.ts
     memory.ts
     cli/              # isolated client code — does not import router/agent/memory
-      chat.ts         # terminal client: connects to runtime/logos.sock
+      chat.ts         # terminal client: connects to runtime/protos.sock
     channels/         # built-in + custom channels (built-in generated from spec/channels/ recipes)
       terminal.ts     # bundled — zero-config client-server channel
       terminal-protocol.ts  # shared JSON message shapes (server + cli/chat.ts)
@@ -554,7 +554,7 @@ runtime/
   clients/            # per-client cursor files
     chat.cursor       # default terminal client
   logs/
-  logos.sock          # Unix socket for terminal channel
+  protos.sock          # Unix socket for terminal channel
   *.pid
   memory-graph.json   # backlink cache
 ```
@@ -617,7 +617,7 @@ Each domain has its own lifecycle, so each should have its own Git repo:
 
 | Domain | Recommended? | Purpose of the repo |
 |--------|--------------|---------------------|
-| `spec/` | **Required** (this repo) | The canonical design, shared across all Logos users |
+| `spec/` | **Required** (this repo) | The canonical design, shared across all Protos users |
 | `agent/` | **Strongly recommended** | History and rollback for self-edits; portable across machines |
 | `config/` | **Recommended** | Sync behavior/identity across machines |
 | `memory/` | **Recommended** (private) | Durable knowledge with line-item history |
