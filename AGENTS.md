@@ -27,16 +27,7 @@ Read `config/SOUL.md` first, every time you wake. That file defines who you are 
 
 ## Tools
 
-Core tools are defined in code under `agent/src/tools/`:
-
-- **read_file** `(path)` — read any file in the workspace
-- **write_file** `(path, content, mode)` — `create`, `append`, or `replace`
-- **edit_file** `(path, old_string, new_string)` — surgical find-and-replace
-- **find_memory** `(name)` — resolve a wiki-link name; returns `{ found: true, path, backlinks }` on hit or `{ found: false }` on miss (no lazy-create)
-- **remember** `(text)` — sugar for appending to today's journal at `memory/journal/{date}.md`
-- **shell** `(cmd)` — run a shell command on the host (use responsibly)
-
-Custom tools live alongside the built-in ones in `agent/src/tools/`.
+Core tools live under `agent/src/tools/`. The full catalog with input/output shapes and behavior is in `spec/tools/` — one recipe per tool. Custom tools live alongside the built-in ones; just drop a `.ts` file into `agent/src/tools/`.
 
 ## Skills
 

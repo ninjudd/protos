@@ -225,17 +225,19 @@ There is no central registry. Adding a job means dropping a file. The merged vie
 
 When a job fires, the scheduler looks up the primary channel and sends the merged prompt to the agent through the router as a synthetic message addressed to the owner's main conversation. A reminder is appended: "If you have nothing to say to the owner, respond with NO_REPLY."
 
-**Router rules for cron dispatch.** When the scheduler dispatches a cron job, it passes the `history` mode alongside the synthetic prompt. The router's behavior:
+**Router rules for cron dispatch.** When the scheduler dispatches a cron job, it passes the `history` mode alongside the synthetic prompt. The cron log always receives the full run; the user thread always receives only the final assistant reply (or nothing on `NO_REPLY`). The `history` mode controls only what the agent reads on the way in:
 
-- For `history: primary`: identical to a normal user message dispatch. The synthetic prompt is appended to the user thread as a user event; the agent's full event stream (text, tool calls, tool results) is appended to the user thread as it's produced. The cron log receives the same events plus the `cron_start` / `cron_end` framing.
-- For `history: none`: the router reads no prior history (passes `[]` to the agent). It suppresses all intermediate writes to the user thread. Only the final assistant text is appended to the user thread (skipped entirely on `NO_REPLY`). The cron log receives the full event stream plus the `cron_start` / `cron_end` framing.
+- `history: primary` — agent reads the recent primary-thread events as context, then the synthetic prompt. Use for proactive jobs that may want to comment on recent activity (heartbeat).
+- `history: none` — agent reads no prior history; only the synthetic prompt is in context. Use for internal jobs whose work is independent of the conversation (dream, nap).
+
+In both cases, intermediate events (multi-step assistant text, tool calls, tool results) are suppressed from the user thread — the user only sees the final reply. The synthetic prompt itself is never written to the user thread either (it would otherwise show up on replay as if the owner had typed "check for unread messages…"). The full event stream lives in the cron log.
 
 **Where the events land** (see [Storage → Message history](#message-history-runtimethreads) for the event schema):
 
 | `history:` | Cron log (`runtime/logs/cron/…`) | User thread (primary channel) |
 |---|---|---|
-| `primary` | full run: `cron_start`, synthetic user prompt, all agent/tool events, `cron_end` | synthetic user prompt, all agent/tool events |
-| `none` | full run: `cron_start`, synthetic user prompt, all agent/tool events, `cron_end` | only the final assistant reply (or nothing on `NO_REPLY`) |
+| `primary` | full run: `cron_start`, synthetic user prompt, all agent/tool events, `cron_end` | final assistant reply only (skipped on `NO_REPLY`) |
+| `none` | full run: `cron_start`, synthetic user prompt, all agent/tool events, `cron_end` | final assistant reply only (skipped on `NO_REPLY`) |
 
 `cron_start` / `cron_end` events exist only in cron logs. They carry the job name, schedule, duration, and final reply for audit purposes. The two files are independent records — matching entries line up by timestamp.
 
@@ -404,7 +406,7 @@ Conversation threads are append-only and grow forever. To keep the agent's worki
 
 Both jobs run with `history: none`: the agent's context for the invocation starts clean (no prior conversation history is loaded), so the consolidation work doesn't need to be isolated in a sub-agent — the cron invocation itself is already an isolated context. Only the final summary reply lands in the user's thread.
 
-**Consolidation cursors.** A per-thread cursor records how many messages have been consolidated into memory. Stored as a sidecar file next to the thread JSONL: `runtime/threads/{channelId}/{conversationId}.cursor` containing a single integer (the count of consolidated messages from the start of the file). Both `nap` and `dream` read and update these cursors so neither re-consolidates content the other has already processed. Cursors share the runtime lifecycle with the threads — wipe `runtime/` and there's nothing to consolidate either.
+**Consolidation cursors.** A per-thread cursor records how many messages have been consolidated into memory. Stored as a sidecar file next to the thread JSONL: `runtime/threads/{channelId}/{conversationId}.cursor` containing a single integer (the count of consolidated messages from the start of the file). Both `nap` and `dream` read and update these cursors so neither re-consolidates content the other has already processed. Cursors live in `runtime/` intentionally — they share the lifecycle of the threads they describe. Wiping `runtime/` (the documented "rebuild from scratch" action) drops both the threads and their cursors together; there's nothing left to consolidate, and nothing gets re-consolidated by accident.
 
 **Thread context at runtime is unchanged.** The agent always sees the most recent N messages of the active thread (capped at the token budget). Consolidated older content reaches the agent through the memory manifest, not through any thread-content rewriting. The thread is "what's happening now"; memory is "what I know."
 
@@ -417,6 +419,8 @@ On startup, the agent checks for `config/SOUL.md`. If it doesn't exist:
 3. Subsequent startups read the populated file.
 
 The agent also creates `config/`, `memory/`, and `runtime/` directories on first run if they don't exist.
+
+**Cron firings are suppressed while bootstrap is incomplete.** If a cron job's scheduled time arrives before `config/SOUL.md` exists, the scheduler skips that firing — otherwise the agent would respond with the bootstrap intro ("what should I be called?") to a heartbeat or dream prompt, polluting the cron log and confusing the user. Self-healing: the next firing after `config/SOUL.md` lands works normally.
 
 ## Startup flow
 

@@ -81,7 +81,7 @@ Functions to export:
 
 - `appendEvent(channelId, conversationId, event)` — append one event to the conversation's JSONL (creating the directory if missing). Sanitize `channelId` and `conversationId` to safe path segments — reject anything with `/`, `..`, or other path-escape characters. Accepts any variant of the event discriminated union.
 - `readEvents(channelId, conversationId, limit?)` — read the file (return `[]` if missing), parse each non-blank line as JSON, drop malformed lines, optionally slice to the last `limit` entries.
-- `buildLlmMessages(events)` — given an ordered event list, produce the AI SDK `CoreMessage[]` to pass to `generateText`. Each event becomes one `CoreMessage` in order; an assistant event with a `tool_calls` field becomes an assistant message whose content is the text plus the tool calls (AI SDK accepts this as a single message with mixed content); `role: "tool"` events become tool messages. `role: "audit"` events (`cron_start`, `cron_end`) are skipped — they're for operator record-keeping, not for the LLM. This is the **correctness fix** that lets the model see the tool calls it actually made.
+- `buildLlmMessages(events)` — given an ordered event list, produce the AI SDK `CoreMessage[]` to pass to `generateText`. Each event becomes one `CoreMessage` in order; an assistant event with a `tool_calls` field becomes an assistant message whose content is the text plus the tool calls (AI SDK accepts this as a single message with mixed content); `role: "tool"` events become tool messages. `role: "audit"` events (`cron_start`, `cron_end`) are skipped — they're for operator record-keeping, not for the LLM. **Adjacent same-role messages are collapsed** into a single message with concatenated content — this naturally happens at turn boundaries (a cron-driven assistant reply directly follows the prior turn's assistant reply, with no user event between) and providers other than Anthropic may not tolerate consecutive same-role messages on the wire. This is the **correctness fix** that lets the model see the tool calls it actually made.
 - `renderForChannel(events)` — apply the render filter: for each `turn_id`, emit user events as-is and the **last** assistant text of the turn (skipping assistant events whose `text` is empty); drop intermediate assistant texts, assistant events' `tool_calls`, `role: "tool"` events, and `role: "audit"` events. Used by watch-based channels (e.g. terminal). Push-based channels don't call this.
 
 The router serializes per-conversation, so `appendEvent` never has a concurrent writer on the same file. No locking needed.
@@ -94,7 +94,7 @@ Implement `agent/src/router.ts`. Behavior contract is in `architecture.md` → R
 
 Implementation:
 
-- Per-conversation queue using a `Map<conversationId, Promise>` so each conversation runs serially.
+- Per-conversation queue keyed on the composite `(channelId, conversationId)` so each conversation runs serially. Don't key on `conversationId` alone — two channels could happen to share the same conversation-id string and end up sharing a queue.
 - **`turn_id` assignment.** User events and the assistant invocation that responds get **different** `turn_id`s. Every event from the same invocation (the user message, or the assistant's multi-step response) shares one `turn_id`. Generate a fresh id at each invocation boundary (uuid or a timestamp-based id).
 - For each inbound message: generate a `turn_id`, append the user event via `threads.appendEvent`, read recent events via `threads.readEvents`, build LLM messages via `threads.buildLlmMessages`, call the agent (passing a fresh `turn_id` for its invocation).
 - The agent runs its multi-step loop. As it produces assistant steps (text + tool calls) and tool results, append each as its own event with the agent's `turn_id`.
@@ -103,7 +103,7 @@ Implementation:
 
 ### 4. Build the agent
 
-Use the Vercel AI SDK's `generateText` for automatic tool execution. Limit the number of tool-use steps to prevent runaway loops. Do not manually implement a tool loop.
+Use the Vercel AI SDK's `generateText` for automatic tool execution. Cap the multi-step tool loop at **`stepCountIs(25)`** to prevent runaway loops. Do not manually implement a tool loop. Sub-agents inherit the same cap.
 
 - Use the `@ai-sdk/anthropic` provider by default.
 - Read the model from the `AI_MODEL` environment variable with a sensible default.
@@ -188,7 +188,7 @@ Behavior:
 - **Compute the sub-agent log path** from the parent context and call id:
   - Cron parent → `runtime/logs/cron/{jobname}/{timestamp}/{callId}.jsonl`
   - Thread parent → `runtime/logs/sub-agents/{channelId}/{conversationId}/{turn_id}-{callId}.jsonl`
-- **Call `generateText`** with the assembled system prompt, the prompt as the user message, the resolved tool subset, the model from the argument or `AI_MODEL`, and a step limit equal to the main agent's (e.g. `stepCountIs(25)`). Append every event the sub-agent produces (user prompt, assistant steps, tool calls, tool results) to the sub-agent log using the same event schema as threads and cron logs.
+- **Call `generateText`** with the assembled system prompt, the prompt as the user message, the resolved tool subset, the model from the argument or `AI_MODEL`, and the same `stepCountIs(25)` cap as the main agent. Append every event the sub-agent produces (user prompt, assistant steps, tool calls, tool results) to the sub-agent log using the same event schema as threads and cron logs.
 - **Return** the final assistant text together with the workspace-relative log path. The tool-loop machinery will include this return value in the parent's `tool_result` event automatically — see `spec/tools/delegate_task.md` for the exact return shape.
 
 Framing line for the system prompt:
@@ -221,11 +221,12 @@ Implement `agent/src/scheduler.ts`. Cron format, merge rules, the merged-job tab
 - Scan both `spec/cron/` and `config/cron/`, parse frontmatter with `js-yaml`, merge per the layering rules (frontmatter override, body append; skip when merged `enabled: false`).
 - Use `node-cron` to schedule each enabled job using its merged `schedule` field.
 - When a job fires:
-   1. Generate a run timestamp `ISO` and open the cron log at `runtime/logs/cron/{jobname}/{ISO}.jsonl`.
-   2. Append a `cron_start` audit event (job name, schedule, `turn_id`, timestamp).
-   3. Append a reminder to the merged body: "If you have nothing to say to the owner, respond with NO_REPLY." Then dispatch through the router as a synthetic message. Pass the cron log file handle so the router can append each agent/tool event to it in addition to the user thread (for `history: primary`) or instead of it (for `history: none`).
-   4. After the agent returns, append a `cron_end` audit event (reply text, `duration_ms`, timestamp).
-- **Honor the `history:` frontmatter field** (default `primary`). For `history: none`, the router skips `readEvents` and runs the agent with only the synthetic prompt as input. The cron log still gets all events; the user thread only gets the final assistant reply (or nothing on `NO_REPLY`).
+   1. **Bootstrap guard.** If `config/SOUL.md` doesn't exist, skip the firing entirely — log a one-line note and return. The agent isn't ready to respond to cron prompts; the next firing after bootstrap works normally.
+   2. Generate a run timestamp `ISO` and open the cron log at `runtime/logs/cron/{jobname}/{ISO}.jsonl`.
+   3. Append a `cron_start` audit event (job name, schedule, `turn_id`, timestamp).
+   4. Append a reminder to the merged body: "If you have nothing to say to the owner, respond with NO_REPLY." Then dispatch through the router as a synthetic message. Pass the cron log file handle so the router can append each agent/tool event to it.
+   5. After the agent returns, append a `cron_end` audit event (reply text, `duration_ms`, timestamp).
+- **Honor the `history:` frontmatter field** (default `primary`). The field controls only what the agent **reads** as context: `primary` reads recent primary-thread events; `none` runs with only the synthetic prompt. **Writes are the same in both cases**: the full event stream goes to the cron log; only the final assistant reply goes to the user thread (skipped on `NO_REPLY`). The synthetic prompt and intermediate steps are NOT written to the user thread.
 - Add a CLI subcommand `agent/logos cron` that prints the merged job table with source annotations (`[spec]`, `[config]`, `[spec → overridden by config]`, `[disabled]`).
 
 ### 8. Wire it all together
