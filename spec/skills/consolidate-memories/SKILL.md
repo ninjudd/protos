@@ -13,7 +13,7 @@ The shared pattern for turning conversation thread content into structured long-
 2. For each thread you want to consolidate:
    1. **`read_thread_tail(channelId, conversationId)`** → `{ messages, newCursor }`. The messages are everything since the cursor.
    2. **Distill** the messages into memory. Update existing files (`edit_file` or `write_file` with `mode: "replace"`), create new ones (`add_memory`), use `[[wiki-links]]` to connect notes, drop transient or routine content.
-   3. **`advance_thread_cursor(channelId, conversationId, to: newCursor)`** — only after the distillation succeeded. Skip on failure; the messages will reappear in the next pass.
+   3. **`advance_thread_cursor(channelId, conversationId, cursor: newCursor)`** — only after the distillation succeeded. Skip on failure; the messages will reappear in the next pass.
 
 That's it. The cursor mechanics are mindless once you use the tools.
 

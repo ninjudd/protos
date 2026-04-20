@@ -23,9 +23,7 @@ Look up a memory note by wiki-link-style name. Returns a list of every file whos
 - `path` — workspace-relative path (e.g. `"memory/preferences/coffee.md"`), suitable for passing to `read_file`.
 - `backlinks` — workspace-relative paths of other memory files that contain `[[...]]` references resolving to this file.
 
-`matches` is empty on no match. Always returns the discriminated shape — never `null`.
-
-**Never returns `null`.** Empty-list discriminator; `matches.length === 0` means "not found."
+`matches` is empty on no match — `matches.length === 0` means "not found." Never `null` or `undefined`.
 
 ## Behavior
 
