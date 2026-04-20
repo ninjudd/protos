@@ -264,7 +264,7 @@ Use a PID file at `runtime/logos.pid` and write logs to `runtime/logs/`. Both ar
 **Safe-restart protocol for `restart`** (architecture: see `architecture.md` → Self-modification):
 
 1. **Snapshot the current `agent/` HEAD.** If `agent/` is a Git repo (`agent/.git` exists), record the current commit SHA with `git -C agent rev-parse HEAD`. If it's not a Git repo, skip the rollback steps below and warn the user that self-edit rollback won't work.
-2. **Typecheck.** Run `tsc --noEmit -p agent/tsconfig.json`. If it fails, abort the restart, keep the old process running, and print the error.
+2. **Typecheck.** Invoke TypeScript from inside `agent/` (where its `node_modules` lives) — e.g. `npm --prefix agent run typecheck` or `(cd agent && npx tsc --noEmit)`. Don't `npx tsc` from the workspace root: there's no `node_modules/.bin/tsc` there, and `npx` will print "This is not the tsc command you are looking for" and fail. If the typecheck fails, abort the restart, keep the old process running, and print the error.
 3. **Stop the old process** (if running) and **start the new one** in the background.
 4. **Health check.** Wait a few seconds (e.g. 5s) and check if the new PID is still alive. If dead:
    - Print the last ~30 lines of the log so the user can see what crashed.
