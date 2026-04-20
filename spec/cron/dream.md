@@ -11,7 +11,7 @@ Daily deep consolidation. Distill every thread's unconsolidated tail, the day's 
 
 ### 1. Threads — full sweep with cross-thread correlation
 
-Use the `consolidate-memories` skill. Call `list_threads()` (the default `min_unconsolidated: 1` picks up every thread with pending work) and run the read-tail → distill → advance loop on each. Look for cross-thread patterns as you go (the same person mentioned in two channels, a decision in one thread that affects work in another).
+Use the `consolidation` skill. Call `list_threads()` (the default `min_unconsolidated: 1` picks up every thread with pending work) and run the read-tail → distill → advance loop on each. Look for cross-thread patterns as you go (the same person mentioned in two channels, a decision in one thread that affects work in another).
 
 ### 2. Journal — promote anything worth keeping
 
@@ -23,7 +23,7 @@ Files under `memory/new/` are notes the agent (or a human in Obsidian) wrote wit
 
 ### 4. Hygiene — keep the graph navigable
 
-After the updates above, do the orphan check and the promotion/demotion pass described in the `consolidate-memories` skill:
+After the updates above, do the orphan check and the promotion/demotion pass described in the `consolidation` skill:
 
 - `find_orphans()` to surface unreachable non-root files. For each, link in or move/delete.
 - Promote subfolder files that are read or referenced often to root level.

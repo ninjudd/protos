@@ -1,9 +1,9 @@
 ---
-name: consolidate-memories
-description: Read unconsolidated thread tails, distill them into long-term memory, and advance the cursors. Used by the dream and nap cron jobs.
+name: consolidation
+description: The per-thread and full-sweep consolidation pattern used by the nap and dream cron jobs — read unconsolidated thread tails, distill them into long-term memory, advance the cursors.
 ---
 
-# Consolidate Memories
+# Consolidation
 
 The shared pattern for turning conversation thread content into structured long-term memory. Used by both `nap` (per-thread, hourly, threshold-gated) and `dream` (full sweep, daily). The mechanics are identical; the cron files layer on different scope.
 

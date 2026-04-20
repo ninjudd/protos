@@ -7,7 +7,7 @@ history: none
 
 Quick, opportunistic per-thread consolidation. Runs hourly, threshold-gated.
 
-Use the `consolidate-memories` skill. Call `list_threads({ min_unconsolidated: 50 })` to get only threads that cross the threshold, then run the read-tail → distill → advance loop on each.
+Use the `consolidation` skill. Call `list_threads({ min_unconsolidated: 50 })` to get only threads that cross the threshold, then run the read-tail → distill → advance loop on each.
 
 Reply with a brief summary of what was consolidated, or `NO_REPLY` if no thread crossed the threshold.
 
