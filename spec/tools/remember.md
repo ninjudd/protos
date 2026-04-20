@@ -31,4 +31,4 @@ Node standard library.
 ## Implementation notes
 
 - This is a thin convenience over `write_file({path: "memory/journal/{date}.md", content: text, mode: "append"})`. Kept as its own tool because journaling is the most common write pattern; the agent shouldn't have to compute today's date and assemble the path each time.
-- The consolidate-memories cron job (`spec/cron/consolidate-memories.md`) reads the day's journal and promotes important items to structured files under `memory/`.
+- The `dream` cron job (`spec/cron/dream.md`) reads the day's journal and promotes important items to structured files under `memory/`.

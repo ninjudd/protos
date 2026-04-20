@@ -47,7 +47,7 @@ Channel-specific variables (including the owner's ID on that platform) are liste
 
 ## Step-by-step
 
-**Note:** Default cron jobs (`spec/cron/heartbeat.md`, `spec/cron/consolidate-memories.md`) and bundled skills (`spec/skills/`) ship with the spec. The running agent reads these directly. Don't copy them into `agent/`.
+**Note:** Default cron jobs (`spec/cron/heartbeat.md`, `spec/cron/nap.md`, `spec/cron/dream.md`) and bundled skills (`spec/skills/`) ship with the spec. The running agent reads these directly. Don't copy them into `agent/`.
 
 ### 1. Initialize the project
 
@@ -145,7 +145,7 @@ Implement `agent/src/memory.ts`. Resolution rules, manifest format, backlink sem
 The module exports:
 
 - **Link resolver** — given a name (optionally path-qualified), return the matching file path or `null` per the resolution rules. Does NOT auto-create.
-- **Graph builder** — at startup, scan `memory/**/*.md`, parse frontmatter and `[[...]]` links, build a name index, a backlink index, and the manifest entries.
+- **Graph builder** — at startup, scan `memory/**/*.md`, parse frontmatter and `[[...]]` links, build a name index and a backlink index covering the full tree. Build manifest entries for **root-level files only** (`memory/*.md`, not recursing into subfolders) — subfolder files are reachable via `[[wiki-links]]` and don't appear in the system prompt.
 - **Cache** — write the graph to `runtime/memory-graph.json`. On startup, check the cache: if all source file mtimes are ≤ the cache's mtime, use it; otherwise rebuild.
 - **Frontmatter parser** — use `js-yaml` to parse the YAML block between `---` delimiters. Tolerate missing or malformed frontmatter (treat as empty).
 
@@ -205,6 +205,7 @@ Implement `agent/src/scheduler.ts`. Cron format, merge rules, and the merged-job
 - Scan both `spec/cron/` and `config/cron/`, parse frontmatter with `js-yaml`, merge per the layering rules (frontmatter override, body append; skip when merged `enabled: false`).
 - Use `node-cron` to schedule each enabled job using its merged `schedule` field.
 - When a job fires, append a reminder to the merged body: "If you have nothing to say to the owner, respond with NO_REPLY." Then look up the primary channel and dispatch through the router as a synthetic message addressed to the owner's conversation.
+- **Honor the `history:` frontmatter field** (default `primary`). For `history: none`, dispatch the synthetic message with a flag that tells the router to skip `getHistory` and run the agent with only the synthetic prompt as input. Add a corresponding option to the router's dispatch path.
 - Add a CLI subcommand `agent/logos cron` that prints the merged job table with source annotations (`[spec]`, `[config]`, `[spec → overridden by config]`, `[disabled]`).
 
 ### 8. Wire it all together
@@ -274,7 +275,7 @@ Verify the build before handing it off. Run these checks outside any sandbox so 
 - `agent/logos start` with blank credentials fails and shows the error in the terminal
 - `agent/logos start` with blank credentials then `agent/logos status` reports not running
 - `config/SOUL.md` does not exist yet (it's written on first run, not by the build)
-- `spec/cron/heartbeat.md` and `spec/cron/consolidate-memories.md` are unchanged
+- `spec/cron/heartbeat.md`, `spec/cron/nap.md`, and `spec/cron/dream.md` are unchanged
 - `spec/` is untouched by the build (the bootstrap only writes to `agent/` and optionally creates `config/`)
 - The wrapper script is executable (`chmod +x agent/logos`)
 - `git -C agent log --oneline` shows at least one commit (the `bootstrap` anchor — critical for safe-restart auto-revert)

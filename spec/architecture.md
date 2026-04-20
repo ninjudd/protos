@@ -158,7 +158,7 @@ Do not return `null`, `undefined`, or `{ path: null }`. The shape above is the c
 
 **Identity** comes from `config/SOUL.md`, written on first run. The agent reads it on every invocation.
 
-**Long-term memory** comes from the `memory/` directory. The system prompt includes a manifest (name + summary) for every memory file; full content is fetched on demand via `find_memory` and `read_file`. See **Memory format** below.
+**Long-term memory** comes from the `memory/` directory. The system prompt includes a manifest of **root-level files only** (name + summary); subfolder files are reached by following `[[wiki-links]]` from a root file. Full content is fetched on demand via `find_memory` and `read_file`. See **Memory format** below.
 
 **Self-awareness.** The agent learns about its scheduled-job invocation mode via the bundled `scheduling` skill (`spec/skills/scheduling/SKILL.md`), whose name and description appear in the skills summary at startup. Without this, the agent doesn't know cron exists and may tell the user it can't reach out proactively — which is wrong; cron firings are exactly the proactive-outreach mechanism.
 
@@ -197,10 +197,19 @@ The scheduler runs cron jobs from two roots: `spec/cron/` (defaults shipped with
 ```markdown
 ---
 schedule: "*/30 * * * *"
+history: primary  # or: none
 ---
 
 Check for unread messages that need follow-up. NO_REPLY if nothing to report.
 ```
+
+Frontmatter fields:
+
+- **`schedule:`** — cron expression. Required to fire.
+- **`enabled:`** — defaults to `true`. Set to `false` to disable.
+- **`history:`** — what conversation context the agent sees when the job fires. Defaults to `primary`.
+  - `primary` — the agent runs with the last 50 messages of the primary channel's owner conversation as context. Use for outreach-style jobs that may want to reference recent activity (e.g. heartbeat).
+  - `none` — the agent runs with no thread history; only the cron body is in context. Use for internal/background jobs that don't depend on a conversation (e.g. consolidation jobs that delegate to a sub-agent and write to memory).
 
 **Layering.** When a file with the same name appears in both roots, the merged job uses:
 
@@ -211,7 +220,7 @@ To disable a spec default, drop a config file with the same name and `enabled: f
 
 There is no central registry. Adding a job means dropping a file. The merged view (with source annotations) is available via `agent/logos cron`.
 
-When a job fires, the scheduler looks up the primary channel and sends the merged prompt to the agent through the router as a synthetic message addressed to the owner's main conversation. A reminder is appended: "If you have nothing to say to the owner, respond with NO_REPLY."
+When a job fires, the scheduler looks up the primary channel and sends the merged prompt to the agent through the router as a synthetic message addressed to the owner's main conversation. A reminder is appended: "If you have nothing to say to the owner, respond with NO_REPLY." For `history: none` jobs the router skips the history fetch and runs the agent with just the synthetic prompt.
 
 ### 5. Self-modification
 
@@ -263,9 +272,9 @@ All plain files spread across the domains:
 - **`config/skills/`** — instance-specific skills (markdown, agentskills.io directory format).
 - **Custom channels and tools** live in `agent/src/channels/` and `agent/src/tools/` alongside the built-in ones — `config/` holds no code.
 - **`memory/`** — granular markdown files of long-term knowledge. See **Memory format** below.
-- **`memory/journal/`** — daily scratch pad files (e.g., `memory/journal/2026-03-09.md`). The agent jots notes throughout the day; the consolidate-memories job promotes important items into the rest of `memory/`.
-- **`memory/new/`** — inbox folder. The agent writes new notes here when there's no obvious folder yet (use `write_file` with `mode: "create"`). The consolidate-memories job sorts the inbox into appropriate folders.
-- **`runtime/`** — `threads/`, `logs/`, `*.pid`, `memory-graph.json` (backlink cache).
+- **`memory/journal/`** — daily scratch pad files (e.g., `memory/journal/2026-03-09.md`). The agent jots notes throughout the day; the `dream` cron promotes important items into the rest of `memory/`.
+- **`memory/new/`** — inbox folder. The agent writes new notes here when there's no obvious folder yet (use `write_file` with `mode: "create"`). The `dream` cron sorts the inbox into appropriate folders.
+- **`runtime/`** — `threads/`, `logs/`, `*.pid`, `memory-graph.json` (backlink cache), and per-thread consolidation cursors (sidecar `*.cursor` files next to each `*.jsonl`; see **Memory consolidation** below).
 
 ## Memory format
 
@@ -315,19 +324,38 @@ The `find_memory` tool returns a file's path and its backlinks ("files that refe
 
 ### Loading into context
 
-Memory is **not loaded eagerly** into the system prompt. Instead, the system prompt includes a **manifest**: a flat list of every memory file with its name, aliases, tags, and a one-line summary. The summary comes from (in order of preference):
+Memory is **not loaded eagerly** into the system prompt. Instead, the system prompt includes a **manifest of root-level files only** — every `memory/*.md` file (not recursing into subfolders), with its name, aliases, tags, and a one-line summary. The summary comes from (in order of preference):
 
 1. The frontmatter `description:` field, if present
 2. The first H1 heading in the body
 3. The first ~100 characters of body text
 
-The manifest gives the agent enough context to know what's available. The agent uses `find_memory` and `read_file` to fetch full content on demand, based on conversation context.
+The manifest gives the agent enough context to know what high-level topics exist. The agent uses `find_memory` and `read_file` to fetch full content on demand, based on conversation context.
 
-**Journal exception:** the last 24 hours of `memory/journal/` entries are included in the system prompt directly, since they're recent agent-authored notes likely to be relevant. Older journal entries appear in the manifest but not inline.
+**Root-level files act as entry points.** Memory is organized so that anything important is reachable from a root file via `[[wiki-links]]` (transitively). Subfolder files exist for organization but are never surfaced in the manifest — the agent finds them by following links from root files. This is the standard "Map of Content" pattern: root files are the front page; deep files live in folders but are linked from above.
+
+The reachability invariant — every non-root file is transitively linked from at least one root file — is maintained by the `dream` cron job, which runs an orphan check during its daily sweep and either links orphans in or archives them.
+
+**Journal exception:** the last 24 hours of `memory/journal/` entries are included in the system prompt directly, since they're recent agent-authored notes likely to be relevant. Journal entries are NOT in the root manifest (they're in the `journal/` subfolder); older entries are reachable only by date.
 
 ### Obsidian compatibility
 
 If `memory/` is opened as an Obsidian vault, Obsidian creates a `.obsidian/` directory for vault settings (workspace layout, plugin config). This directory is machine-local and should be in `memory/.gitignore`. Configure Obsidian's "Default location for new notes" → `new/` so notes you create in Obsidian land in the same inbox the agent uses.
+
+## Memory consolidation
+
+Conversation threads are append-only and grow forever. To keep the agent's working knowledge useful as threads grow, two scheduled jobs distill thread content into long-term memory.
+
+**Two-tier consolidation:**
+
+- **`nap`** (hourly, `history: none`) — quick per-thread pass. Walks `runtime/threads/`; for any thread whose unconsolidated message count exceeds a threshold, delegates a focused consolidation pass to a sub-agent via `delegate_task`. Scoped to one thread at a time. Doesn't touch journal or inbox.
+- **`dream`** (daily, `history: none`) — deep full sweep. Delegates to a sub-agent that reads all threads (allowing cross-thread correlations), the day's journal, and the `memory/new/` inbox. Updates memory files, runs the orphan check (every non-root file reachable from a root file via `[[wiki-links]]`), promotes hot content to root level, archives or deletes cold content. Posts a brief summary to the user.
+
+Both jobs delegate to a sub-agent rather than doing the work in the main agent's context — consolidation reads a lot of text and would otherwise pollute the main thread's context window.
+
+**Consolidation cursors.** A per-thread cursor records how many messages have been consolidated into memory. Stored as a sidecar file next to the thread JSONL: `runtime/threads/{channelId}/{conversationId}.cursor` containing a single integer (the count of consolidated messages from the start of the file). Both `nap` and `dream` read and update these cursors so neither re-consolidates content the other has already processed. Cursors share the runtime lifecycle with the threads — wipe `runtime/` and there's nothing to consolidate either.
+
+**Thread context at runtime is unchanged.** The agent always sees the most recent N messages of the active thread (capped at the token budget). Consolidated older content reaches the agent through the memory manifest, not through any thread-content rewriting. The thread is "what's happening now"; memory is "what I know."
 
 ## First-run flow
 
@@ -386,7 +414,8 @@ spec/
       SKILL.md
   cron/               # default cron jobs (markdown with frontmatter)
     heartbeat.md
-    consolidate-memories.md
+    nap.md
+    dream.md
 
 # Generated implementation — gitignored, optionally a separate repo
 agent/
