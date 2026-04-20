@@ -18,7 +18,7 @@ Read any file in the workspace by relative path. Returns the file's text content
 
 Plain string — the file's content as UTF-8 text.
 
-On error: throws. The agent's dispatch layer records the error as the tool result (see `architecture.md` → Tool return shapes).
+On error: throws.
 
 ## Behavior
 
