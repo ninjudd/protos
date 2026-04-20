@@ -22,10 +22,13 @@ Only forward messages where the chat ID matches `TELEGRAM_OWNER_ID`. Silently ig
 
 Supports text, photos, documents, voice messages, and stickers. For non-text content, normalize to a placeholder string (e.g. `[photo]`, `[voice message]`) since the agent only handles text for now.
 
+## Markdown conversion
+
+The assistant writes standard markdown; Telegram expects MarkdownV2 (with required escaping of reserved characters `_ * [ ] ( ) ~ \` > # + - = | { } . !`). Convert messages with a library like `telegramify-markdown` and send with `parse_mode: "MarkdownV2"`. Standard `**bold**`, headings, and lists all come through correctly after conversion.
+
 ## Gotchas
 
 - **`bot.start()` blocks forever.** It runs long polling and does not resolve until the bot stops. Don't await it during registration or it will block the entire process. Fire and forget it.
 - **Message length limit.** Telegram caps messages at 4096 characters. The agent can easily exceed this. Split long replies into multiple messages.
 - **Typing indicator expires.** Telegram's typing indicator lasts about 5 seconds. If the agent takes longer, re-send the typing action periodically until the response is ready.
-- **Markdown formatting.** The agent responds with Markdown, but grammY sends plain text by default. Set `parse_mode` to `"Markdown"` when sending messages so formatting renders correctly.
 - grammY handles long polling natively — no webhook or HTTP server needed.
