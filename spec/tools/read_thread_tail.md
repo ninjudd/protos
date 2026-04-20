@@ -29,7 +29,7 @@ Return the messages in a thread that haven't been consolidated yet (everything f
 ## Behavior
 
 - Reads the sidecar cursor file (missing means `0`), reads the JSONL.
-- Applies the same render filter channels use (see `architecture.md` → Cursor-based replay → Render filter): for each `turn_id`, emit the user event and the **last** assistant text; hide intermediate assistant texts, tool calls, tool results, and audit events. Consolidation cares about the conversation, not the agent's internal reasoning.
+- Applies the same render filter channels use (see `architecture.md` → Cursor-based replay → Render filter): for each `turn_id`, emit the user event and the **last** non-empty, non-`NO_REPLY` assistant text; hide intermediate assistant texts, tool calls, tool results, and audit events. Consolidation cares about the conversation, not the agent's internal reasoning or its lifecycle markers.
 - `newCursor` is the count of total **events** (lines) at read time. Pass this to `advance_thread_cursor` to mark the full span consolidated. **Don't compute the new cursor yourself** — using the value returned here avoids a race where events arriving between this call and `advance_thread_cursor` would otherwise be skipped.
 - Does NOT advance the cursor. The agent is responsible for advancing only after the messages have been successfully processed (e.g. summarized into memory).
 

@@ -58,7 +58,7 @@ When a client connects:
 The JSONL stores the full agent event stream (user messages, assistant steps with tool calls, tool results). The client only wants to see the user-facing conversation. The server collapses events per `turn_id` before emitting to clients:
 
 - `user` events → emitted as-is.
-- `assistant` events → only the **last** assistant text per `turn_id` is emitted (intermediate "Let me check…" texts from multi-step turns are skipped).
+- `assistant` events → only the **last** assistant text per `turn_id` is emitted (intermediate "Let me check…" texts from multi-step turns are skipped). Empty-text assistant events and the literal `NO_REPLY` lifecycle marker are also skipped — `NO_REPLY` is not a message.
 - An assistant event's `tool_calls` field, and `role: "tool"` events → **not emitted** to the client in the default view.
 - `audit` events (`cron_start`, `cron_end`) → **not emitted** to the client.
 
