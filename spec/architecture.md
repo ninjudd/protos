@@ -152,6 +152,8 @@ Tool return values get JSON-serialized and shown to the model. Two conventions:
 
 **Invariant: every tool call in the thread JSONL is paired with a tool result event.** The dispatch layer guarantees this regardless of whether the tool returned, threw, or timed out. A missing result orphans the `tool_calls` entry, and subsequent invocations can't replay the history — the LLM SDK rejects message histories with orphan tool calls, and the conversation stops responding.
 
+The invariant is achieved by wrapping each tool's `execute` at registration time with an error-catching adapter. If the underlying call throws, the adapter returns `{ error: <message> }` as the result instead of propagating the throw. This keeps the LLM SDK's normal success path — including the entry in `step.toolResults` — so the dispatch layer's `onStep` callback writes a corresponding `tool` event to the thread.
+
 **Skills** are markdown instruction files that teach the agent how to accomplish complex tasks using its tools. Bundled skills live in `spec/skills/`, instance-specific skills in `config/skills/`. Both directories are scanned at startup; on name collision, `config/` wins.
 
 **Identity** comes from `config/SOUL.md`, written on first run. The agent reads it on every invocation.
