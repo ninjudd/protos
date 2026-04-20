@@ -37,6 +37,18 @@ More specifically:
 
 The repository contains no running code. It contains the spec. The coding agent reads the spec and generates the implementation.
 
+## Updating
+
+When the spec evolves, sync your implementation the same way you bootstrapped it. Point your coding agent at the workspace and say:
+
+```
+update agent
+```
+
+The agent pulls the latest `spec/`, diffs it against your `agent/` tree, shows what would change, and applies the edits once you approve. Restart with `agent/logos restart` to pick them up.
+
+Only `agent/` is regenerated. Your `config/`, `memory/`, and `runtime/` are left alone.
+
 ## What you get
 
 A personal AI assistant that:
@@ -59,6 +71,7 @@ The workspace is split into five sibling domains. Only `spec/` is tracked by thi
 README.md, CLAUDE.md, AGENTS.md   # workspace entry-point docs
 spec/                             # the blueprint
   architecture.md                 # system design
+  agent.md                        # base prompt for the running assistant
   build.md                        # build instructions for coding agents
   channels/                       # channel recipes (markdown)
   tools/                          # tool recipes (markdown)
