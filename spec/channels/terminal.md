@@ -124,10 +124,10 @@ The loop should feel like a normal chat: the user types a line, sees it rendered
 - **Prompt:** `> ` (just the prompt character). This is what the user sees before typing.
 - **On Enter (before sending):** the user's typed line is visible on the prompt line (`> hello?`). The client then **clears that line** with an ANSI sequence (`\x1b[1A\r\x1b[2K` — cursor up one line, carriage return, clear line) so the line can be redrawn uniformly by the render path when the server echoes it back. Otherwise the same message appears twice — once as raw typed input, once as the rendered echo.
 - **Send to server** as `{type: "message", text: "..."}`.
-- **Server echoes via `fs.watch`:** the JSONL append triggers a broadcast; the client receives a `{type: "message", role: "user", ...}` event and renders it normally (e.g. `you: hello?`). Same render path as replay. This also means other connected clients see your message — cross-client visibility is free.
-- **Assistant reply arrives:** render as `logos:` + body (wrapped, markdown applied).
-- **Async output collision:** readline may have the `> ` prompt drawn when an assistant message or another client's echo arrives. Before printing any async output, clear the current line (`readline.cursorTo(out, 0); readline.clearLine(out, 0);`), print the message, then `rl.prompt()` again. Otherwise the prompt and message smash onto the same line (`> logos: ...`).
-- **Labels:** use consistent labels for user and assistant in the transcript. `you:` and `logos:` (or equivalent — pick one style and use it everywhere). The input prompt (`> `) is visual, not a label; it never appears in the rendered transcript.
+- **Server echoes via `fs.watch`:** the JSONL append triggers a broadcast; the client receives a `{type: "message", role: "user", ...}` event and renders it normally. Same render path as replay. This also means other connected clients see your message — cross-client visibility is free.
+- **Assistant reply arrives:** render the body wrapped with markdown applied.
+- **Async output collision:** readline may have the `> ` prompt drawn when an assistant message or another client's echo arrives. Before printing any async output, clear the current line (`readline.cursorTo(out, 0); readline.clearLine(out, 0);`), print the message, then `rl.prompt()` again. Otherwise the prompt and message smash onto the same line.
+- **Distinguishing speakers:** no `you:` / `logos:` labels. User messages are rendered with a highlighted background (a subtle ANSI background color spanning the visible width of each line) so they stand out from assistant replies. Assistant replies render plain. The input prompt (`> `) is visual, not a label; it never appears in the rendered transcript.
 
 
 ### Thinking indicator (client)
