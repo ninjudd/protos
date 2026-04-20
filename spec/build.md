@@ -148,6 +148,7 @@ Implementation conventions:
 - **Memory graph cache invalidation** — any tool that writes under `memory/` (`write_file`, `edit_file`, `remember`, `add_memory`, `rename_memory`) must delete `runtime/memory-graph.json` so the next graph operation rebuilds.
 - **Resolution-preservation helper** — `add_memory` and `rename_memory` share the same pre/post snapshot → rewrite-changed-resolutions algorithm. Extract it as a single helper in `agent/src/memory.ts` and call it from both tools.
 - **Tool return shapes** follow `architecture.md` → Tool return shapes. Never return bare `null` from a tool.
+- **Tool error capture** — wrap each tool's `execute` at registration with an error-catching adapter. If the underlying call throws, return `{ error: <message> }` instead of propagating the throw, so the AI SDK includes the result in `step.toolResults` and the dispatch layer writes a corresponding `tool` event. Required for the call/result pairing invariant — see `architecture.md` → Tool return shapes.
 
 Custom tools are added by dropping `.ts` files directly into `agent/src/tools/` alongside the built-in ones. Loader scans that single directory.
 

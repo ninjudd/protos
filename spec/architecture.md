@@ -147,8 +147,10 @@ Users can add their own tools directly in `agent/src/tools/` — same location a
 
 Tool return values get JSON-serialized and shown to the model. Two conventions:
 
-- **Tools that succeed-or-throw** (`read_file`, `write_file`, `edit_file`, `remember`, `shell`) return their result on success and throw on failure. The AI SDK reports the throw to the model as an error.
+- **Tools that succeed-or-fail** (`read_file`, `write_file`, `edit_file`, `remember`, `shell`) return their result on success. On failure they may throw; the agent's tool-dispatch layer catches the error and records it as the tool result so the model sees the error message.
 - **Tools that succeed-or-miss** (anything that does lookup) return a **discriminated shape** — a list (empty = miss) or a union with a boolean tag — never a bare `null`. Makes the shape unambiguous to the model and leaves room for diagnostic fields later. See `spec/tools/find_memory.md` for the canonical example.
+
+**Invariant: every tool call in the thread JSONL is paired with a tool result event.** The dispatch layer guarantees this regardless of whether the tool returned, threw, or timed out. A missing result orphans the `tool_calls` entry, and subsequent invocations can't replay the history — the LLM SDK rejects message histories with orphan tool calls, and the conversation stops responding.
 
 **Skills** are markdown instruction files that teach the agent how to accomplish complex tasks using its tools. Bundled skills live in `spec/skills/`, instance-specific skills in `config/skills/`. Both directories are scanned at startup; on name collision, `config/` wins.
 
