@@ -224,7 +224,7 @@ Implement `agent/src/scheduler.ts`. Cron format, merge rules, the merged-job tab
    1. **Bootstrap guard.** If `config/SOUL.md` doesn't exist, skip the firing entirely — log a one-line note and return. The agent isn't ready to respond to cron prompts; the next firing after bootstrap works normally.
    2. Generate a run timestamp `ISO` and open the cron log at `runtime/logs/cron/{jobname}/{ISO}.jsonl`.
    3. Append a `cron_start` audit event (job name, schedule, `turn_id`, timestamp).
-   4. Append a reminder to the merged body: "If you have nothing to say to the owner, respond with NO_REPLY." Then dispatch through the router as a synthetic message. Pass the cron log file handle so the router can append each agent/tool event to it.
+   4. Append the cron reminder (see `architecture.md` → Scheduler) to the merged body. Then dispatch through the router as a synthetic message. Pass the cron log file handle so the router can append each agent/tool event to it.
    5. After the agent returns, append a `cron_end` audit event (reply text, `duration_ms`, timestamp).
 - **Honor the `history:` frontmatter field** (default `primary`). The field controls only what the agent **reads** as context: `primary` reads recent primary-thread events; `none` runs with only the synthetic prompt. **Writes are the same in both cases**: the full event stream goes to the cron log; only the final assistant reply goes to the user thread (skipped on `NO_REPLY`). The synthetic prompt and intermediate steps are NOT written to the user thread.
 - Add a CLI subcommand `agent/logos cron` that prints the merged job table with source annotations (`[spec]`, `[config]`, `[spec → overridden by config]`, `[disabled]`).
