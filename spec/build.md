@@ -11,14 +11,14 @@ The bootstrap reads from `spec/` (recipes, skills, cron defaults, this document)
 Ask the user for:
 
 - **Primary channel** (required) — Which messaging platform? (Telegram, WhatsApp, Discord, Slack, etc.)
-- **AI model** (optional) — Which model to use. Defaults to the latest Claude Sonnet if not specified.
+- **AI model** (optional) — Which model to use. Defaults to the latest Claude Sonnet. Any Claude or GPT model works out of the box.
 
 Don't worry about the assistant's name or personality — those are configured on first run through the messaging channel itself. The agent prompts the user and writes `config/SOUL.md` automatically.
 
 ## Key packages
 
 - `ai` — **Vercel AI SDK**. Use the latest version. Provides `generateText` with built-in tool execution. Limit the number of tool-use steps to prevent runaway loops. Do not manually implement a tool loop.
-- `@ai-sdk/anthropic` — Anthropic provider for the AI SDK (default). Can be swapped for `@ai-sdk/openai`, `@ai-sdk/google`, etc.
+- `@ai-sdk/anthropic` and `@ai-sdk/openai` — AI SDK providers, both installed by default so users can switch between Claude and GPT via `AI_MODEL` alone. Other providers (`@ai-sdk/google`, etc.) can be added as needed.
 - `js-yaml` — YAML parsing for cron frontmatter and skill frontmatter
 - `node-cron` — cron expression scheduling
 - `tsx` — TypeScript execution without a build step. The agent can modify its own source and restart to apply changes.
@@ -33,8 +33,8 @@ All secrets (API keys, bot tokens) go in `config/.env`. This file is gitignored 
 
 At minimum:
 
-- The API key for whichever AI provider you're using (e.g. `ANTHROPIC_API_KEY` for Anthropic)
-- `AI_MODEL` — model to use. Default to a sensible current model; don't pin exact version strings since model names change frequently.
+- `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` — at least one must be set; which one depends on the `AI_MODEL` you choose.
+- `AI_MODEL` — model to use. Default to a sensible current Claude model; don't pin exact version strings since model names change frequently. The provider is inferred from the model ID (`claude-*` → Anthropic, `gpt-*`/`o1*`/`o3*`/`o4*` → OpenAI). If inference is ambiguous, set `AI_PROVIDER` explicitly (`anthropic` or `openai`).
 - `PRIMARY_CHANNEL` — the channel used for the owner's main conversation (e.g. `telegram`). The scheduler sends replies here.
 - `PROTOS_SELF_EDIT` — `true` (default) or `false`. See `architecture.md` → Self-modification for the toggle's effects.
 - `PROTOS_TERMINAL` — `true` (default) or `false`. When false, the terminal channel doesn't bind the socket and `agent/protos chat` has no daemon to connect to.
@@ -58,7 +58,7 @@ Channel-specific variables (including the owner's ID on that platform) are liste
 - Install packages with `npm install <package-name>` from inside `agent/` rather than writing `package.json` by hand — this ensures you get the latest versions and only lists direct dependencies. **Never manually edit the `dependencies` or `devDependencies` objects in `package.json`.**
 - Source code goes in `agent/src/` per the file structure in `architecture.md`.
 - Use `process.cwd()` for the workspace root path, not `import.meta.dirname` — tsx runs in CJS mode where `import.meta.dirname` is undefined. The wrapper script ensures the process runs with the workspace root as cwd.
-- Create `config/` if it doesn't exist (the agent should do this on first run, but the build can pre-create it). Create a `config/.env` template with the API key for the chosen provider, `AI_MODEL`, `PRIMARY_CHANNEL`, and any channel-specific variables. Leave secrets blank for the user to fill in.
+- Create `config/` if it doesn't exist (the agent should do this on first run, but the build can pre-create it). Create a `config/.env` template with `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `AI_MODEL`, `PRIMARY_CHANNEL`, and any channel-specific variables. Leave secrets blank for the user to fill in.
 
 ### 1a. Initialize Git repos for agent/, config/, memory/
 
@@ -106,7 +106,7 @@ Implementation:
 
 Use the Vercel AI SDK's `generateText` for automatic tool execution. Cap the multi-step tool loop at **`stepCountIs(25)`** to prevent runaway loops. Do not manually implement a tool loop. Sub-agents inherit the same cap.
 
-- Use the `@ai-sdk/anthropic` provider by default.
+- Select the provider from `AI_MODEL` per the mapping in **Environment variables** above; honor `AI_PROVIDER` as the override.
 - Read the model from the `AI_MODEL` environment variable with a sensible default.
 - The agent receives conversation history (the current message is already the last entry). Pass it directly to the SDK as the messages array.
 - Cap conversation history at 50 messages (most recent) to avoid blowing past token limits. Apply the cap when retrieving history, not in the agent.
@@ -247,7 +247,7 @@ That's it. No HTTP server needed unless a channel requires a webhook.
 Create a bash script at `agent/protos` that supports:
 
 - `agent/protos` (no args) — print a usage message listing the subcommands and exit.
-- `agent/protos start` — start the process in the background
+- `agent/protos start` — start the process in the background. Before launching, validate that `AI_MODEL` is set in `config/.env` and that the API key for its provider (see **Environment variables**) is non-empty. If not, print a clear error naming the variable and `config/.env`, then exit non-zero without starting. The check lives in the wrapper so errors surface directly in the user's terminal — the daemon is backgrounded and its stderr only reaches the log file.
 - `agent/protos stop` — stop it
 - `agent/protos restart` — restart it (with safe-restart protocol below)
 - `agent/protos status` — check if it's running

@@ -58,7 +58,7 @@ Practical rule: if it works well with Git, it belongs in `memory/`. If it doesn'
 | Runtime | Node.js 18+ |
 | Language | TypeScript |
 | Storage | Plain files — no database |
-| AI | Vercel AI SDK (`ai`) with `@ai-sdk/anthropic` (default provider) |
+| AI | Vercel AI SDK (`ai`) with `@ai-sdk/anthropic` and `@ai-sdk/openai` bundled |
 | Hosting | Runs directly on the host — no containers |
 
 ## Components
@@ -161,8 +161,6 @@ The invariant is achieved by wrapping each tool's `execute` at registration time
 **Long-term memory** comes from the `memory/` directory. The system prompt includes a manifest of **root-level files only** (name + summary); subfolder files are reached by following `[[wiki-links]]` from a root file. Full content is fetched on demand via `find_memory` and `read_file`. See **Memory format** below.
 
 **Self-awareness.** The agent learns about its scheduled-job invocation mode via the bundled `scheduling` skill (`spec/skills/scheduling/SKILL.md`), whose name and description appear in the skills summary at startup. Without this, the agent doesn't know cron exists and may tell the user it can't reach out proactively — which is wrong; cron firings are exactly the proactive-outreach mechanism.
-
-**Model-agnostic:** The default provider is Anthropic (Claude), but switching to OpenAI, Google, or any other provider is a one-line change.
 
 #### Sub-agents
 
