@@ -213,7 +213,7 @@ Frontmatter fields:
 - **`schedule:`** — cron expression. Required to fire.
 - **`enabled:`** — defaults to `true`. Set to `false` to disable.
 - **`history:`** — what conversation context the agent sees when the job fires. Defaults to `primary`.
-  - `primary` — the agent runs with the last 50 messages of the primary channel's owner conversation as context. Use for outreach-style jobs that may want to reference recent activity (e.g. heartbeat).
+  - `primary` — the agent runs with the primary channel's owner conversation as context, capped at the most recent events (see `build.md` → step 4 for the exact cap and the turn-alignment rule). Use for outreach-style jobs that may want to reference recent activity (e.g. heartbeat).
   - `none` — the agent runs with no thread history; only the cron body is in context. Use for internal/background jobs that don't depend on a conversation (e.g. consolidation jobs that delegate to a sub-agent and write to memory).
 
 **Layering.** When a file with the same name appears in both roots, the merged job uses:
