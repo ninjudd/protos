@@ -14,21 +14,23 @@ If you're not sure which you need, try `web_fetch` first. If it returns junk, an
 
 ## Privacy
 
-`browser-harness` drives the owner's **real, logged-in Chrome**. Anything you do happens inside their authenticated sessions — banking, email, work tools, all of it. Treat its output the way you'd treat the owner's own browsing: don't paste page contents into third-party services, don't log full screenshots, and prefer `delegate_task` for multi-step workflows so the raw context stays out of the main thread.
+`browser-harness` drives the owner's **real, logged-in Chrome**. Chrome itself spells out the implication when remote debugging is toggled on:
+
+> Turning on this setting allows external apps to request full control of this browser. This includes read access to your saved data, cookies and site data, and the ability to navigate to any URL.
+
+You are one of those external apps. Treat the browser's output the way you'd treat the owner's own browsing — banking, email, work tools, all of it. Don't paste page contents into third-party services, don't log full screenshots, and prefer `delegate_task` for multi-step workflows so the raw context stays out of the main thread.
 
 For sub-agent or stealth work where the owner's primary Chrome is the wrong tool, browser-harness supports the cloud browsers from `cloud.browser-use.com`. See the upstream README before reaching for that.
 
-## Setup (one-time)
+## One-time install
 
 Check whether browser-harness is already installed before doing anything:
 
 ```bash
-which browser-harness && browser-harness --doctor
+which browser-harness
 ```
 
-If both succeed, you're done — skip to **Usage**.
-
-If `browser-harness` is missing, walk the owner through installation. Confirm before you start:
+If missing, walk the owner through installation. Confirm before you start:
 
 ```bash
 git clone https://github.com/browser-use/browser-harness vendor/browser-harness
@@ -37,11 +39,20 @@ uv tool install -e ./vendor/browser-harness
 
 If `uv` isn't installed, point the owner at https://docs.astral.sh/uv/ — don't try to install it for them, package managers are the owner's call.
 
-Then walk them through enabling Chrome remote debugging:
+Verify install with `browser-harness --doctor` (this won't connect to Chrome yet — see the next section).
 
-> Open `chrome://inspect/#remote-debugging` in Chrome and tick the "Discover network targets" checkbox so browser-harness can attach. Leave Chrome running.
+## Chrome remote-debugging toggle
 
-Verify with `browser-harness --doctor`. If it can't reach Chrome, tell the owner what the error said rather than retrying blindly.
+The owner enables `browser-harness` access by ticking **"Allow remote debugging for this browser instance"** at `chrome://inspect/#remote-debugging`. The page shows "Server running at: 127.0.0.1:9222" once it's live. Unticking the same checkbox is the only off switch — `browser-harness` calls then fail at the connection step and you fall back to `web_fetch`. (Uninstalling the binary doesn't help; this skill would just walk the owner through reinstalling it.)
+
+Whether they leave it on or toggle it per-task depends on the deployment:
+
+- **Dedicated host** (e.g., a Mac Mini that just runs Protos) — leaving it on is fine. The machine isn't being used for the owner's everyday browsing, so there's nothing to be cautious about overlapping with.
+- **Daily-driver machine** (Protos shares Chrome with the owner's normal browsing) — the owner probably wants it off when they're not using you, and tick it before a task that needs the browser. While it's on, any local process can connect to `127.0.0.1:9222`, so off-by-default narrows that window.
+
+If you don't know which setup the owner has, ask once and save the answer to memory.
+
+Verify with `browser-harness --doctor`. If it can't reach Chrome, tell the owner what the error said rather than retrying blindly — the most likely cause is the checkbox is unticked.
 
 ## Usage
 
@@ -82,7 +93,3 @@ When you discover a non-obvious pattern yourself (a private API, a stable select
 - The owner asked for something that would require their auth on a service they haven't used in this thread or in memory. Confirm first — "I'd be using your logged-in {service} session for this; OK?"
 - Any action that spends money, sends a message, or makes a public post. Confirm.
 - Anything resembling scraping at scale, automated account creation, or evading rate limits / bot detection. Refuse and explain.
-
-## Disabling
-
-There's no env-var kill switch. To disable: don't install browser-harness (or `uv tool uninstall browser-harness`). Once it's not on `$PATH`, the `shell` invocation will fail with a clear error and you'll fall back to `web_fetch`.
