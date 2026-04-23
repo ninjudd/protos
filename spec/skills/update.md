@@ -14,7 +14,7 @@ The coding agent runs non-interactively (no human in its loop), so the review ha
 1. **Pull the spec.** `git -C spec pull` to fetch the latest.
 2. **Find the delta.** Use `git -C agent log -1 --format=%aI` to get the timestamp of the agent's last commit (the last sync point), then `git -C spec log --since="<that-timestamp>" --oneline` to list spec commits newer than that. If nothing comes back, tell the owner the spec is already current and stop.
 3. **Summarize for the owner.** List the new spec commits with their subject lines and a one-sentence description of what each changes (group by theme when helpful). Ask whether to proceed.
-4. **On approval, delegate via the coding skill.** Use the **coding** skill to spawn Claude Code or Codex from the workspace root with the prompt `update agent`. It follows `spec/build.md` → Updating: diffs the spec against `agent/`, applies the edits, and commits inside `agent/`.
+4. **On approval, delegate via the coding skill.** Use the **coding** skill to spawn Claude Code or Codex from the workspace root with the prompt `update`. It follows `spec/build.md` → Updating: diffs the spec against `agent/`, applies the edits, and commits inside `agent/`.
 5. **Report completion.** Summarize what the coding agent committed (use `git -C agent show --stat HEAD`). Remind the owner to run `agent/protos restart` if `agent/src/` was touched.
 
 ## Rules
