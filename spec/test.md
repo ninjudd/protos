@@ -1,10 +1,10 @@
 # Test
 
-For the `test agent` command — generate or refresh tests in `agent/test/` that verify the implementation matches the spec, then run them.
+For the `test` command — generate or refresh tests in `agent/test/` that verify the implementation matches the spec, then run them.
 
-## Hard rule: only `test agent` touches `agent/test/`
+## Hard rule: only `test` touches `agent/test/`
 
-`bootstrap` and `update agent` never read, write, run, or even mention tests — even if tests already exist. The user explicitly invokes `test agent` after `update agent` (or whenever else) to refresh the suite. This keeps the cost of tests visible: someone who tried `test agent` once and moved on doesn't pay for test maintenance on every spec sync.
+`bootstrap` and `update` never read, write, run, or even mention tests — even if tests already exist. The user explicitly invokes `test` after `update` (or whenever else) to refresh the suite. This keeps the cost of tests visible: someone who tried `test` once and moved on doesn't pay for test maintenance on every spec sync.
 
 ## Framework
 
@@ -37,4 +37,4 @@ Spec-defined invariants and contracts — things the spec explicitly promises ab
 
 ## Running
 
-`npm test` (which runs `vitest run`). The `test agent` invocation runs the suite after writing or updating tests, and reports the result back to the user. A failing test means either the implementation drifted from the spec or the spec changed without the test catching up — flag both possibilities to the user; don't auto-fix.
+`npm test` (which runs `vitest run`). The `test` invocation runs the suite after writing or updating tests, and reports the result back to the user. A failing test means either the implementation drifted from the spec or the spec changed without the test catching up — flag both possibilities to the user; don't auto-fix.

@@ -302,11 +302,11 @@ Verify the build before handing it off:
 
 ## When you're done
 
-The build is complete. `AGENTS.md` stays as-is — it's the coding-agent entry point and is needed again for future `update agent` invocations.
+The build is complete. `AGENTS.md` stays as-is — it's the coding-agent entry point and is needed again for future `update` invocations.
 
 ## Updating
 
-For the `update agent` command — sync an existing implementation when the spec evolves.
+For the `update` command — sync an existing implementation when the spec evolves.
 
 1. **Identify the delta.** Read `spec/` as-is and compare against the current `agent/` tree. `git log` on the spec repo is useful for surfacing recent changes.
 2. **Propose the changes** to the user — a per-file summary is more useful than a raw diff. Apply once they approve.

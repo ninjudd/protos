@@ -42,7 +42,7 @@ The repository contains no running code. It contains the spec. The coding agent 
 When the spec evolves, sync your implementation the same way you bootstrapped it. Point your coding agent at the workspace and say:
 
 ```
-update agent
+update
 ```
 
 The agent pulls the latest `spec/`, diffs it against your `agent/` tree, shows what would change, and applies the edits once you approve. Restart with `agent/protos restart` to pick them up.
@@ -54,12 +54,12 @@ Only `agent/` is regenerated. Your `config/`, `memory/`, and `runtime/` are left
 To generate or refresh tests that verify your `agent/` matches the spec, point your coding agent at the workspace and say:
 
 ```
-test agent
+test
 ```
 
 The agent reads `spec/` for the invariants and contracts the implementation must satisfy (tool return shapes, the call/result pairing rule, the skill loader's flat-scan + dual-form + merge behavior, render-filter rules, and so on), writes tests in `agent/test/` that exercise them, and runs the suite. Tests use [vitest](https://vitest.dev) by default.
 
-`test agent` is always a manual step — bootstrap and `update agent` don't run it for you.
+`test` is always a manual step — bootstrap and `update` don't run it for you.
 
 ## What you get
 
