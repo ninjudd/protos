@@ -7,6 +7,8 @@ The user may invoke you with:
 - **`build <channel>`** — first-time generation. Read `spec/build.md` and generate the implementation in `agent/` for the named channel (telegram, slack, discord, …).
 - **`update`** — sync an existing implementation with spec changes. Follow `spec/build.md` → Updating.
 - **`test`** *(optional)* — generate or refresh tests in `agent/test/` that verify the implementation matches the spec, then run them. Follow `spec/test.md`. This is the **only** invocation that touches `agent/test/` — build and update never write, run, or mention tests.
+- **`review`** *(optional)* — audit `agent/` against `spec/` and produce a markdown report of any drift. Follow `spec/review.md`. **Read-only** — never writes, modifies, or runs anything.
+- **`debug [issue description]`** *(optional)* — diagnose a specific issue the owner is having with their running agent (e.g. `debug Telegram keeps crashing`). Follow `spec/debug.md`. Asks clarifying questions if needed; never auto-applies fixes.
 
 Start with:
 

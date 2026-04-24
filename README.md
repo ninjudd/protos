@@ -61,6 +61,21 @@ The agent reads `spec/` for the invariants and contracts the implementation must
 
 `test` is always a manual step — build and `update` don't run it for you.
 
+## Reviewing & debugging (optional)
+
+Two more workflow commands you can run any time:
+
+```
+review
+debug <free-form description>
+```
+
+- **`review`** audits `agent/` against `spec/` and produces a markdown report of any drift — file references, what the spec requires, what the code does. Read-only; it never writes or modifies anything. Useful when you've hand-edited `agent/` and want to know whether your changes diverged from the spec, or when something feels off and you want a structural check before reaching for `debug`.
+
+- **`debug`** takes a free-form symptom (`debug Telegram keeps crashing`) and diagnoses it from your `runtime/` logs, threads, and code. It asks clarifying questions if the description isn't enough, and may offer to write a test or run `review` as part of the investigation. Output is always a diagnosis plus a suggested change — never an auto-applied fix.
+
+Both write a log under `runtime/reviews/` or `runtime/debug/` so you can re-read past sessions without re-running.
+
 ## What you get
 
 A personal AI assistant that:
