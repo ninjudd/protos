@@ -55,6 +55,8 @@ If you don't know which setup the owner has, ask once and save the answer to mem
 
 Verify with `browser-harness --doctor`. If it can't reach Chrome, tell the owner what the error said rather than retrying blindly — the most likely cause is the checkbox is unticked.
 
+**Watch for the first-attach Allow popup.** Even when the toggle is on and `--doctor` reports `chrome running` + `daemon alive`, the very first connection of a session can pop a Chrome confirmation dialog ("Allow remote debugging…") that browser-harness can't auto-dismiss. The symptom is a `browser-harness` invocation that exits non-zero with stderr containing **`click Allow on chrome://inspect (and tick the checkbox if shown)`** — and `--doctor` keeps reporting healthy, so retrying is pointless. Treat that exact stderr as a wait-for-human signal: message the owner once asking them to click Allow in their Chrome window, then wait for their reply before retrying. Don't loop on it.
+
 ## Usage
 
 Pipe Python to the CLI via heredoc. Helpers (`new_tab`, `wait_for_load`, `page_info`, `screenshot`, `click`, `type_text`, …) are preloaded — call them directly, don't import.
@@ -68,6 +70,12 @@ PY
 ```
 
 The full helper surface lives in `vendor/browser-harness/helpers.py`. Read it when you need to know what's available.
+
+### Picking a click primitive
+
+For anything addressable in the DOM (buttons, links, "Show more" expanders), prefer `js()` calling `element.click()` (or `dispatchEvent(new MouseEvent('click', { bubbles: true }))`) over the coordinate-based `click(x, y)`. Coordinate clicks against `getBoundingClientRect()` look reliable but break on any reflow between extraction and click — the page can shift, a layout pass can move the target, and you fire into empty space. JS-targeted clicks bind to the element itself, survive reflow, and don't require the element to be in the viewport.
+
+`click(x, y)` stays the right tool for: canvas widgets, sites with custom event handlers that explicitly check synthetic-event shape (some banks, some games), and any pixel target that has no DOM handle.
 
 ### Heavy or multi-step work → delegate
 
@@ -85,9 +93,9 @@ Don't hand-edit `helpers.py` from your shell tool. Delegate to the coding agent 
 
 ## Site-specific patterns
 
-`vendor/browser-harness/domain-skills/` contains community-contributed patterns for specific sites (github, linkedin, amazon, …). When working on one of those sites, read the relevant `domain-skills/{site}/` first — it'll save selector hunting.
+`vendor/browser-harness/domain-skills/` contains community-contributed patterns for specific sites (github, linkedin, amazon, …). **First action on a new domain:** `ls vendor/browser-harness/domain-skills/{site}/` and skim anything that's there. Even a 30-second read saves selector hunting and avoids fragile improvisations against site UIs that change often (X's "Show more" expansion is a classic example).
 
-When you discover a non-obvious pattern yourself (a private API, a stable selector, a needed wait), file it under `vendor/browser-harness/domain-skills/{site}/` via the `coding` skill. Per upstream convention, don't hand-author these — let the coding agent generate them from what actually worked in the browser.
+When you discover a non-obvious pattern yourself (a private API, a stable selector, a needed wait, a reliable way to dismiss a recurring dialog), file it under `vendor/browser-harness/domain-skills/{site}/` via the `coding` skill at the end of the task. Per upstream convention, don't hand-author these — let the coding agent generate them from what actually worked in the browser this run.
 
 ## When to refuse
 
