@@ -4,9 +4,16 @@
 
 `@whiskeysockets/baileys` — unofficial WhatsApp Web API. Used by both OpenClaw and NanoClaw.
 
-## Environment variables
+## Configuration
 
-- None — Baileys authenticates by linking as a companion device (QR code or pairing code)
+`config/channels.yaml` entry:
+
+```yaml
+whatsapp:
+  owner_id: "15551234567"
+```
+
+- **`owner_id`** — your WhatsApp JID (typically your phone number with country code, no `+`). Baileys authenticates by linking as a companion device (QR code or pairing code) on first run — no credentials in the YAML.
 
 ## Setup
 

@@ -6,10 +6,17 @@ A client-server chat channel. The daemon binds a Unix socket; `agent/protos chat
 
 Node standard library only — `node:net`, `node:fs/promises`, `node:fs`, `node:readline`. No external dependencies.
 
-## Environment variables
+## Configuration
 
-- `PROTOS_TERMINAL` — `true` (default) or `false`. When false, the channel skips registering and the socket isn't created. No other env vars required.
-- `PROTOS_TERMINAL_SOCKET` — optional override for the socket path. Defaults to `runtime/agent.sock`.
+`config/channels.yaml` entry:
+
+```yaml
+terminal:
+  enabled: true                    # set to false to disable
+  socket: runtime/agent.sock       # optional — override the socket path
+```
+
+No credentials are needed. The socket lives in the workspace filesystem; access is determined by file permissions. When `enabled: false`, the channel doesn't bind the socket and `agent/protos chat` has no daemon to connect to.
 
 ## Channel identity
 

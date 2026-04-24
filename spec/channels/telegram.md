@@ -4,10 +4,18 @@
 
 `grammy` — modern Telegram bot framework for Node.js.
 
-## Environment variables
+## Configuration
 
-- `TELEGRAM_BOT_TOKEN` — message [@BotFather](https://t.me/BotFather) on Telegram, send `/newbot`, follow the prompts, and copy the token it gives you. To retrieve an existing token, send `/mybots`, select the bot, and tap "API Token."
-- `TELEGRAM_OWNER_ID` — your Telegram user ID (a number). Message [@userinfobot](https://t.me/userinfobot) on Telegram and it will reply with your ID.
+`config/channels.yaml` entry:
+
+```yaml
+telegram:
+  bot_token: $TELEGRAM_BOT_TOKEN
+  owner_id: 456789
+```
+
+- **`bot_token`** — message [@BotFather](https://t.me/BotFather) on Telegram, send `/newbot`, follow the prompts, and copy the token. To retrieve an existing token, send `/mybots`, select the bot, and tap "API Token."
+- **`owner_id`** — your Telegram user ID (a number). Message [@userinfobot](https://t.me/userinfobot) on Telegram and it will reply with your ID.
 
 ## Setup
 
@@ -16,7 +24,7 @@
 
 ## Owner filtering
 
-Only forward messages where the chat ID matches `TELEGRAM_OWNER_ID`. Silently ignore all other messages.
+Only forward messages where the chat ID matches the entry's `owner_id`. Silently ignore all other messages.
 
 ## Non-text content
 

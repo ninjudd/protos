@@ -20,9 +20,19 @@ The sub-agent has only what you give it. Always specify both `skills` and `tools
   prompt: string,        // The task description. Be specific about what you want returned.
   skills: string[],      // Skill names to load. The full body of each gets inlined into the sub-agent's system prompt. Pass [] for no skills.
   tools: string[],       // Tool names the sub-agent may call. Pass [] for no tools (purely a thinking task).
-  model?: string,        // Optional model override. Defaults to AI_MODEL.
+  model?: string,        // Optional model profile (from config/models.yaml). See Model resolution below.
 }
 ```
+
+### Model resolution
+
+The sub-agent's model is picked in this order:
+
+1. **Explicit `model:` arg** — a profile name from `config/models.yaml`. Unknown name errors the call.
+2. **First skill with a resolvable `preferred_model:`** — walks `skills:` in order; the first skill whose `preferred_model:` names an existing profile wins. Skills with no `preferred_model:`, or with one that doesn't resolve, are skipped. This lets skills ship with preferences (e.g. `coding`, `browser-use` → `reasoning`) without forcing every user to define those profiles — if `reasoning` isn't configured, resolution falls through.
+3. **`subagent` profile** — the default for all `delegate_task` calls when neither arg nor skill preference applies.
+
+The caller controls priority by ordering `skills:` — put the skill whose model preference matters most first.
 
 ## Output
 
