@@ -81,13 +81,27 @@ Channels are messaging platform integrations. Each channel:
 - Sends outbound messages from the agent back to the platform
 - Shows a typing indicator while the agent is thinking
 
-**Owner-only:** Each channel knows the owner's ID on that platform (e.g., `TELEGRAM_OWNER_ID`). Messages from anyone else are silently ignored.
+**Owner-only:** Each channel knows the owner's ID on that platform. Messages from anyone else are silently ignored.
 
-**Self-registering:** A channel only activates if its credentials are present in the environment. No credentials, no channel — no errors, no configuration needed.
+**Config-driven registration.** Channels are defined in `config/channels.yaml`. Each top-level entry is a channel name; its `provider:` field names the implementation module under `agent/src/channels/` and defaults to the channel name if omitted. Modules in `agent/src/channels/` are **providers**, not auto-activating channels — a module is only instantiated when a `channels.yaml` entry references it. Two entries with the same `provider:` but different names are allowed (e.g., `work-telegram:` and `personal-telegram:` both using `provider: telegram`); each gets its own `channelId` and thread directory.
 
-**Main chat:** The `PRIMARY_CHANNEL` environment variable names the channel used for the owner's main conversation (e.g., `telegram`). The scheduler sends replies to the owner's conversation on this channel.
+```yaml
+# config/channels.yaml
+primary: telegram           # string value = pointer to another entry
+telegram:
+  provider: telegram        # optional — defaults to the channel name
+  bot_token: $TELEGRAM_BOT_TOKEN
+  owner_id: 456789
+  model: reasoning          # optional — names a profile in models.yaml
+terminal:
+  enabled: true             # no credentials needed
+```
 
-**Recipes vs implementations:** Channel **recipes** (`.md` setup guides) live in `spec/channels/` — they describe how to build each channel. Channel **implementations** (`.ts` code) live in `agent/src/channels/`. Both built-in channels (generated from spec recipes by the build) and custom channels (added by the user) live in the same directory — the `agent/` repo is the user's own implementation, so there's no need for a parallel code location in `config/`.
+Like `models.yaml`, any top-level entry is either a full config (an object) or a pointer (a string). `primary:` is a conventional entry naming the channel used for the owner's main conversation — the scheduler sends cron replies here.
+
+**Per-entry fields.** `provider:` selects the module; `model:` names a model profile (falls through to `default` if omitted); credentials and platform-specific fields (e.g. `bot_token`, `owner_id`) are consumed by the provider module. `enabled: false` disables a channel without deleting its block.
+
+**Recipes vs implementations:** Channel **recipes** (`.md` setup guides) live in `spec/channels/` — they describe how to build each provider module. Channel **implementations** (`.ts` code) live in `agent/src/channels/`. Both built-in channels (generated from spec recipes by the build) and custom channels (added by the user) live in the same directory — the `agent/` repo is the user's own implementation, so there's no need for a parallel code location in `config/`.
 
 #### Channel `send()` contract
 
@@ -182,6 +196,47 @@ The skills summary in the system prompt shows both source paths for a merged ski
 
 **Self-awareness.** The agent learns about its scheduled-job invocation mode via the bundled `scheduling` skill (`spec/skills/scheduling.md`), whose name and description appear in the skills summary at startup. Without this, the agent doesn't know cron exists and may tell the user it can't reach out proactively — which is wrong; cron firings are exactly the proactive-outreach mechanism.
 
+#### Model selection
+
+The agent supports multiple LLMs through named **profiles** in `config/models.yaml`. Each profile names a provider, a model ID, and credentials; callers (channels, cron jobs, `delegate_task`) reference profiles by name.
+
+```yaml
+# config/models.yaml
+default:
+  provider: anthropic
+  model: claude-sonnet-4-6
+  api_key: $ANTHROPIC_API_KEY
+  temperature: 0.7
+  fallback: fast
+subagent: fast              # string value = pointer to another profile
+fast:
+  provider: anthropic
+  model: claude-haiku-4-5
+  api_key: $ANTHROPIC_API_KEY
+reasoning:
+  provider: openai
+  model: gpt-5
+  api_key: $OPENAI_API_KEY
+```
+
+**Pointers and inline definitions.** Every top-level entry is either a full profile (an object) or a pointer (a string naming another entry). `default` and `subagent` are conventional names — `default` is the fallback choice when nothing more specific is requested; `subagent` is the default for `delegate_task`. Either may be defined inline or as a pointer.
+
+**Env-var substitution.** Any string field accepts `$NAME` as a whole-string value; the loader replaces it with `process.env.NAME`. Missing env vars error at load, naming the file path and variable. This lets users who want to commit `models.yaml` keep credentials in `.env`; users who don't mind can inline values.
+
+**Fallback.** A profile's `fallback:` names another profile. When a call against a profile errors with a credit-exhausted, rate-limit, or provider 5xx error, the runtime retries the same call against the fallback. **Auth errors do NOT fall back** — they're config bugs and silent fallback hides them. One hop only; cycles detected at load.
+
+**Selection precedence.**
+
+- **User messages through a channel:** channel's `model:` → `default`.
+- **Cron firings:** cron frontmatter `model:` (merged per layering rules — config overrides spec) → `default`.
+- **`delegate_task`:** explicit `model:` arg → first skill in `skills:` with a resolvable `preferred_model:` → `subagent`.
+
+**Hints vs. directives.** Channel `model:`, cron `model:`, explicit `delegate_task` `model:`, and profile `fallback:` are **directives** — an unknown profile errors (at load for static references, at call time for dynamic). Skill `preferred_model:` is a **hint** — if the named profile doesn't exist, the preference is silently skipped and resolution continues (next skill's preference, else `subagent`). This lets skills ship with reasonable preferences without forcing every user to define a matching profile.
+
+**Validation at load.** The loader validates every profile resolves (no unknown pointers, no cycles), every resolved profile has provider + model + api_key after env substitution, and every directive reference (channel `model:` in `channels.yaml`, cron `model:` in merged frontmatter, profile `fallback:`) points at an existing profile. Skill `preferred_model:` is a hint and is NOT validated at load. Today "load" = startup; validation failures exit the process non-zero with a message naming the file and the offending reference. If reload is added later, the same validation runs each time.
+
+**Temperature** is a per-profile field. Other knobs (max tokens, thinking budget, …) can be added later — keep the schema minimal until there's demand.
+
 #### Sub-agents
 
 The agent can spawn focused sub-agents via the `delegate_task` tool. A sub-agent is a separate `generateText` invocation with:
@@ -232,6 +287,7 @@ Frontmatter fields:
 
 - **`schedule:`** — cron expression. Required to fire.
 - **`enabled:`** — defaults to `true`. Set to `false` to disable.
+- **`model:`** — optional model profile name (see Model selection). Defaults to `default`.
 - **`history:`** — what conversation context the agent sees when the job fires. Defaults to `primary`.
   - `primary` — the agent runs with the primary channel's owner conversation as context, capped at the most recent events (see `build.md` → step 4 for the exact cap and the turn-alignment rule). Use for outreach-style jobs that may want to reference recent activity (e.g. heartbeat).
   - `none` — the agent runs with no thread history; only the cron body is in context. Use for internal/background jobs that don't depend on a conversation (e.g. consolidation jobs that delegate to a sub-agent and write to memory).
@@ -342,6 +398,8 @@ No retention policy — kept forever. Small text, useful for the agent to reflec
 All plain files spread across the domains:
 
 - **`config/SOUL.md`** — identity. The agent writes this on first run after asking the user for a name and personality. Read on every invocation.
+- **`config/models.yaml`** — LLM profiles and credentials. Read at startup. See Model selection.
+- **`config/channels.yaml`** — messaging channels and credentials. Read at startup. See Channels.
 - **`config/cron/`** — instance-specific scheduled jobs (markdown).
 - **`config/skills/`** — instance-specific skills. Accepts both the spec's flat `{name}.md` form and the agentskills.io directory form (`{name}/SKILL.md` + optional `scripts/`).
 - **Custom channels and tools** live in `agent/src/channels/` and `agent/src/tools/` alongside the built-in ones — `config/` holds no code.
@@ -449,12 +507,13 @@ The agent also creates `config/`, `memory/`, and `runtime/` directories on first
 ## Startup flow
 
 1. Ensure `runtime/` directory exists (`runtime/threads/` is created lazily on first message)
-2. Discover skills (scan `spec/skills/*.md`; scan `config/skills/` for both `*.md` and `*/SKILL.md`; load names and descriptions; on name collision, merge — config frontmatter wins, config body appended to spec body)
-3. Discover tools (scan `agent/src/tools/`)
-4. Register channels (scan `agent/src/channels/`; each checks for credentials and connects if present). If no channels connect, exit with an error.
-5. Start the scheduler (scan `spec/cron/` and `config/cron/`; merge by filename per the layering rules above)
-6. If `config/SOUL.md` doesn't exist, run first-run flow
-7. Begin processing incoming messages
+2. Load `config/models.yaml`: parse, run `$NAME` substitution, resolve pointers, validate (see Model selection → Validation at load). Error out on any invalid entry.
+3. Discover skills (scan `spec/skills/*.md`; scan `config/skills/` for both `*.md` and `*/SKILL.md`; load names and descriptions; on name collision, merge — config frontmatter wins, config body appended to spec body)
+4. Discover tools (scan `agent/src/tools/`)
+5. Load `config/channels.yaml` and register channels: for each entry, look up its `provider:` (default = entry name) in `agent/src/channels/` and instantiate the provider module with the entry's config. Skip entries with `enabled: false`. If no channels register, exit with an error.
+6. Start the scheduler (scan `spec/cron/` and `config/cron/`; merge by filename per the layering rules above)
+7. If `config/SOUL.md` doesn't exist, run first-run flow
+8. Begin processing incoming messages
 
 ## File structure
 
@@ -543,10 +602,12 @@ agent/
     agents/           # sub-agent runner (single generic file, no per-agent definitions)
       runner.ts
 
-# Behavior — gitignored, optionally a separate repo. Markdown only — no code.
+# Behavior — gitignored, optionally a separate repo.
 config/
   SOUL.md             # written on first run
-  .env                # secrets
+  models.yaml         # LLM profiles + credentials (see Model selection)
+  channels.yaml       # messaging channels + credentials (see Channels)
+  .env                # optional — holds secrets referenced from YAML via $NAME
   cron/               # instance-specific or override jobs (markdown)
   skills/             # instance-specific skills — accepts both flat {name}.md and agentskills.io {name}/SKILL.md form
 
@@ -586,35 +647,39 @@ runtime/
 
 Channels and tools are **code** — they live in `agent/src/`, which is the user's own implementation repo. Their recipes live in `spec/`. Skills and cron are **behavior configuration** — markdown-only, layered between `spec/` (defaults) and `config/` (user overrides).
 
-| | Recipes | Code | Layered? |
-|---|---|---|---|
-| **Channels** | `spec/channels/{name}.md` | `agent/src/channels/{name}.ts` | No — single code root |
-| **Tools** | `spec/tools/{name}.md` | `agent/src/tools/{name}.ts` | No — single code root |
-| **Skills** | `spec/skills/{name}.md` (built-in) + `config/skills/{name}.md` *or* `config/skills/{name}/SKILL.md` (user) | none | Yes — two-root, frontmatter override + body append |
-| **Cron** | `spec/cron/{name}.md` (default) + `config/cron/{name}.md` (override) | none | Yes — two-root, frontmatter override + body append |
+| | Recipes | Code | Instance config | Layered? |
+|---|---|---|---|---|
+| **Channels** | `spec/channels/{provider}.md` | `agent/src/channels/{provider}.ts` | `config/channels.yaml` entries | No — single code root; channel names from YAML |
+| **Tools** | `spec/tools/{name}.md` | `agent/src/tools/{name}.ts` | — | No — single code root |
+| **Skills** | `spec/skills/{name}.md` (built-in) + `config/skills/{name}.md` *or* `config/skills/{name}/SKILL.md` (user) | none | — | Yes — two-root, frontmatter override + body append |
+| **Cron** | `spec/cron/{name}.md` (default) + `config/cron/{name}.md` (override) | none | — | Yes — two-root, frontmatter override + body append |
 
 The asymmetry is intentional:
 
-- **Code lives in `agent/` because `agent/` is the user's repo.** Built-in channels (generated from spec recipes during build) and custom channels (added by the user) live in the same directory. There's no need for a separate "user extension" location because the user already owns `agent/`.
+- **Code lives in `agent/` because `agent/` is the user's repo.** Built-in providers (generated from spec recipes during build) and custom providers (added by the user) live in the same directory. There's no need for a separate "user extension" location because the user already owns `agent/`.
 - **Skills and cron live partly in `spec/` because they're behavior the spec ships with defaults for** (e.g., the heartbeat job, the `self-edit` skill). A user can override a default by dropping a same-named file in `config/`. No code means no node_modules or compilation — pure markdown layering.
 
 Rules:
 
-- **Filename = capability name.** No central registry. The loader scans the directory for `*.ts` files (channels, tools) or `*.md` files (cron, skills, with `config/skills/` additionally accepting `{name}/SKILL.md` for off-the-shelf agentskills.io drops) and registers each one.
+- **Channels: filename = provider name.** `agent/src/channels/telegram.ts` implements the `telegram` provider. Channel *names* are arbitrary and come from `config/channels.yaml`; they reference a provider by file-basename via their `provider:` field (or by matching the entry's name). The channel loader scans `agent/src/channels/` to build the provider map but only instantiates providers referenced from `channels.yaml`.
+- **Tools / skills / cron: filename = capability name.** No central registry — the loader scans the directory and registers every file.
 - **Recipes describe; implementations execute.** A recipe in `spec/channels/telegram.md` tells the build how to generate `agent/src/channels/telegram.ts`. Recipes never name the implementation path explicitly — the path is determined by their own location.
-- **Custom channels don't need spec recipes.** A user adding a channel directly to `agent/src/channels/` can colocate the optional `.md` alongside it, or skip the recipe entirely.
+- **Custom channels don't need spec recipes.** A user adding a provider directly to `agent/src/channels/` can colocate the optional `.md` alongside it, or skip the recipe entirely.
 
 ### Adding a channel
 
-A channel's `.ts` file exports a `register` function that takes the router and returns the channel's ID, owner conversation ID, and send function if it connected — or nothing if credentials were missing.
+A provider module in `agent/src/channels/` exports a factory function that the registry calls once per matching `channels.yaml` entry:
 
-`register()`:
+```ts
+export function createChannel(name: string, config: ChannelConfig, router: Router):
+  { channelId: string, ownerConversationId: string, send: (text: string) => void }
+```
 
-1. Checks if its credentials exist (e.g., `TELEGRAM_BOT_TOKEN`)
-2. If not, returns nothing
-3. If yes, connects, starts forwarding owner messages to the router (ignoring all others), and returns
+- `name` is the top-level key from `channels.yaml`; the factory uses it as `channelId` so thread storage and cron routing can target this specific channel.
+- `config` is the entry's resolved config (credentials and platform-specific fields), post `$NAME` substitution and pointer resolution.
+- The factory connects, starts forwarding owner messages to the router (ignoring all others), and returns. If connection fails (bad credentials, network), it throws — the registry logs the failure and continues with the remaining channels.
 
-To add a channel: write `agent/src/channels/{name}.ts`. If it's reusable, also write a recipe at `spec/channels/{name}.md` so future users can build it.
+To add a channel: write `agent/src/channels/{provider}.ts` and add an entry to `config/channels.yaml` naming it. If the provider is reusable, also write a recipe at `spec/channels/{provider}.md` so future users can build it.
 
 ### Applying spec updates
 
@@ -676,7 +741,7 @@ cd memory && git init  # commits happen as the agent learns
 - The agent runs with shell access and the same permissions as the host user. Consider running it on a dedicated machine or in a container.
 - The **shell tool** runs commands using bash from the workspace root with a 1 MB output limit. The agent should confirm destructive commands with the user before running them.
 - **Never log credentials.** When catching errors, log only the error message — not full objects, which may contain API tokens or bot secrets.
-- Secrets live in `config/.env`.
+- Secrets live in `config/models.yaml` and `config/channels.yaml` (inline, or referenced via `$NAME` substitution from `config/.env`).
 - The thread files in `runtime/threads/` contain all your messages — protect that directory accordingly.
 
 ## Non-goals
@@ -684,7 +749,6 @@ cd memory && git init  # commits happen as the agent learns
 These are intentionally left out. They may be added later.
 
 - **Multi-user conversations** — all messages are assumed to be from the owner
-- **Multiple AI providers at once** — one provider per deployment
 - **Web UI or dashboard** — the messaging app is the interface
 - **Plugin system** — channels, tools, and skills are just files, not a formal plugin API
 - **Submodules** — `agent/`, `config/`, and `memory/` are independent repos when promoted, never submodules

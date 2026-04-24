@@ -1,6 +1,7 @@
 ---
 name: coding
 description: Delegate complex coding tasks to a coding agent (Claude Code or Codex).
+preferred_model: reasoning
 ---
 
 # Coding

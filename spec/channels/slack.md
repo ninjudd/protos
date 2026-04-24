@@ -4,10 +4,20 @@
 
 `@slack/bolt` — official Slack app framework.
 
-## Environment variables
+## Configuration
 
-- `SLACK_BOT_TOKEN` — Bot User OAuth Token (starts with `xoxb-`)
-- `SLACK_APP_TOKEN` — App-Level Token for Socket Mode (starts with `xapp-`)
+`config/channels.yaml` entry:
+
+```yaml
+slack:
+  bot_token: $SLACK_BOT_TOKEN
+  app_token: $SLACK_APP_TOKEN
+  owner_id: U123ABC456
+```
+
+- **`bot_token`** — Bot User OAuth Token (starts with `xoxb-`)
+- **`app_token`** — App-Level Token for Socket Mode (starts with `xapp-`)
+- **`owner_id`** — your Slack member ID. Open your profile in Slack, click the "…" menu, and "Copy member ID".
 
 ## Setup
 

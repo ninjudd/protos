@@ -9,10 +9,20 @@ No npm library needed. Uses the [BlueBubbles](https://bluebubbles.app) server's 
 - A Mac with Messages.app signed into your Apple ID
 - BlueBubbles server installed and running on that Mac (can be the same machine running Protos)
 
-## Environment variables
+## Configuration
 
-- `BLUEBUBBLES_URL` — BlueBubbles server URL (e.g. `http://localhost:1234`)
-- `BLUEBUBBLES_PASSWORD` — server password for API authentication
+`config/channels.yaml` entry:
+
+```yaml
+imessage:
+  bluebubbles_url: $BLUEBUBBLES_URL
+  bluebubbles_password: $BLUEBUBBLES_PASSWORD
+  owner_id: "+15551234567"
+```
+
+- **`bluebubbles_url`** — BlueBubbles server URL (e.g. `http://localhost:1234`).
+- **`bluebubbles_password`** — server password for API authentication.
+- **`owner_id`** — the owner's iMessage handle (phone number in E.164 format, or Apple ID email).
 
 ## Setup
 

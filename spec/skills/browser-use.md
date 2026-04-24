@@ -1,6 +1,7 @@
 ---
 name: browser-use
 description: Drive a real browser via browser-harness when web_fetch isn't enough — auth, clicks, forms, screenshots, signed-in pages.
+preferred_model: reasoning
 ---
 
 # Browser use

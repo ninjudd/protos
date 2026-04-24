@@ -4,11 +4,22 @@
 
 `matrix-js-sdk` — official Matrix client SDK for JavaScript.
 
-## Environment variables
+## Configuration
 
-- `MATRIX_HOMESERVER` — homeserver URL (e.g. `https://matrix.org`)
-- `MATRIX_USER_ID` — bot's user ID (e.g. `@protos:matrix.org`)
-- `MATRIX_ACCESS_TOKEN` — access token for the bot account
+`config/channels.yaml` entry:
+
+```yaml
+matrix:
+  homeserver: $MATRIX_HOMESERVER
+  user_id: $MATRIX_USER_ID
+  access_token: $MATRIX_ACCESS_TOKEN
+  owner_id: "@justin:matrix.org"
+```
+
+- **`homeserver`** — homeserver URL (e.g. `https://matrix.org`).
+- **`user_id`** — the bot's Matrix user ID (e.g. `@protos:matrix.org`).
+- **`access_token`** — access token for the bot account.
+- **`owner_id`** — the owner's Matrix user ID.
 
 ## Setup
 
