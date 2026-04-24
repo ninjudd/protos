@@ -20,10 +20,10 @@ Protos is an architecture specification — a set of documents precise enough th
 You don't install Protos. You point an AI coding agent at it and say:
 
 ```
-build <channel>
+build <channels>
 ```
 
-…where `<channel>` is whichever messaging platform you want (Telegram, WhatsApp, Discord, Slack, …). The agent reads the spec and generates the assistant.
+where `<channels>` are the messaging platforms you want (Telegram, WhatsApp, Discord, Slack, iMessage, Terminal). The agent reads the spec and generates the assistant.
 
 More specifically:
 
