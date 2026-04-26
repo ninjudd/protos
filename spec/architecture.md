@@ -26,7 +26,7 @@ The architecture documents (`architecture.md`, `build.md`), channel recipes, bun
 
 The running agent reads from `spec/` directly for skills and cron defaults. Spec updates take effect on the next agent restart — no copy step, no drift.
 
-`spec/` is **read-only at runtime**. The file-edit tools (`write_file`, `edit_file`) refuse any path under `spec/` regardless of other settings; `shell` carries a description nudge with the same rule. Spec changes happen out-of-band — via PR or via a coding agent invoked outside the running daemon. Instance-specific extensions to skills and cron go in `config/skills/` / `config/cron/`, which the loader merges with `spec/` at startup — config frontmatter wins, config body appends to spec body. See the **Layering** notes under Skills and Scheduler for details.
+`spec/` is **read-only at runtime by convention**. The system prompt reinforces it; production deployments harden it via `chmod -R a-w spec/` (see [Self-modification](#5-self-modification) for path discipline). Spec changes happen out-of-band — via PR or via a coding agent invoked outside the running daemon. Instance-specific extensions to skills and cron go in `config/skills/` / `config/cron/`, which the loader merges with `spec/` at startup — config frontmatter wins, config body appends to spec body. See the **Layering** notes under Skills and Scheduler for details.
 
 ### `agent/` — generated implementation
 
@@ -67,7 +67,7 @@ Practical rule: if it works well with Git, it belongs in `memory/`. If it doesn'
 | Runtime | Node.js 18+ |
 | Language | TypeScript |
 | Storage | Plain files — no database |
-| AI | Vercel AI SDK (`ai`) with `@ai-sdk/anthropic` and `@ai-sdk/openai` bundled |
+| AI | [`@exprotos/agent-sdk`](https://github.com/ExProtos/agent-sdk) — one API over four runtimes (Claude Agent SDK, Codex AppServer, OpenAI Agents SDK, Vercel AI SDK) |
 | Hosting | Runs directly on the host — no containers |
 
 ## Components
@@ -151,37 +151,44 @@ This applies to all invocations — direct user messages and cron-originated hea
 
 ### 3. Agent
 
-The agent is the brain. It uses the Vercel AI SDK to receive a message + history, decide how to respond, optionally use tools, and return a response.
+The agent is the brain. It uses [agent-sdk](https://github.com/ExProtos/agent-sdk) to receive a message + history, decide how to respond, optionally use tools, and return a response. agent-sdk wraps four runtimes (Claude Agent SDK, Codex AppServer, OpenAI Agents SDK, Vercel AI SDK) behind one API; each model profile picks one as its **backend** (see [Model selection](#model-selection) below).
 
-**Tools** are typed capabilities defined in code. Each built-in tool has a recipe in `spec/tools/{name}.md` describing its inputs, outputs, behavior, and dependencies — same pattern as channels. Implementations live in `agent/src/tools/`.
+**Tools** are typed capabilities. agent-sdk ships a canonical catalog with backend-specific dispatch — native implementations on Claude/Codex (sandboxed `Bash`, tuned `Read`/`Write`/`Edit`/`apply_patch`, native `Task`/`TodoWrite`), hosted tools on OpenAI Agents (`web_search`, `code_interpreter`, etc.), and bundled in-process implementations on Vercel and OpenAI Agents fallbacks. Custom protos-specific tools live in `agent/src/tools/` and are passed alongside the canonical set.
 
-The kernel ships eight tools:
+**Canonical tools** (provided by agent-sdk):
 
-- `read_file(path)` — read any file in the workspace
-- `write_file(path, content, mode)` — `create` (fail if exists), `append`, or `replace` (overwrite)
-- `edit_file(path, old_string, new_string)` — surgical find-and-replace; `old_string` must appear exactly once
+- `bash(command)` — run a shell command
+- `read(path)` — read any file in the workspace
+- `write(path, content)` — create or overwrite a file
+- `edit(path, old_string, new_string)` — surgical find-and-replace
+- `glob(pattern)` — file pattern matching
+- `grep(pattern, path?)` — content search
+- `webFetch(url)` — fetch a URL and return content as markdown
+- `webSearch(query)` — web search; native on Claude/Codex/OpenAI Agents (hosted `web_search`); silent no-op on Vercel until a `withImpls` provider is wired
+- `todo(todos)` — task list (native on Claude/Codex; in-memory state with system-prompt re-injection on Vercel/OpenAI Agents)
+- `task({prompt, subagent_type})` — spawn a focused SDK-level sub-agent (see [Sub-agents](#sub-agents))
+
+**Custom tools** (protos-specific, in `agent/src/tools/`):
+
 - `find_memory(name)` — resolve a wiki-link-style name to every matching file, sorted shortest-path first (see [Tool return shapes](#tool-return-shapes))
 - `add_memory(name, content)` — create a new memory file and preserve any `[[wiki-link]]` resolutions the new file would otherwise shadow
 - `rename_memory(oldName, newName)` — move/rename a memory file and rewrite `[[wiki-links]]` so every reference resolves to the same file it did before
-- `remember(text)` — sugar for appending to today's journal
-- `shell(cmd)` — run a shell command (1 MB output limit)
-- `delegate_task({ prompt, skills, tools, model? })` — spawn a sub-agent in an isolated context (see [Sub-agents](#sub-agents))
-- `web_fetch(url)` — fetch a URL and return content as markdown (see `spec/tools/web_fetch.md` for backend choice and privacy)
+- `add_journal_entry(text)` — append a timestamped line to today's journal
+- `delegate_task({ prompt, skills, tools, model? })` — protos's skill-aware sub-agent (see [Sub-agents](#sub-agents))
+- Plus consolidation/orphan-finder helpers used by cron jobs
 
-Memory-aware tools (`find_memory`, `add_memory`, `rename_memory`) take names in **wiki-link form** — no `memory/` prefix, no `.md` extension. They return full workspace paths (e.g. `memory/preferences/coffee.md`) in their output for interop with `read_file`.
+Memory-aware tools (`find_memory`, `add_memory`, `rename_memory`) take names in **wiki-link form** — no `memory/` prefix, no `.md` extension. They return full workspace paths (e.g. `memory/preferences/coffee.md`) in their output for interop with `read`.
 
-Users can add their own tools directly in `agent/src/tools/` — same location as the built-in tools. The AI SDK handles tool execution loops natively — limit the number of steps to prevent runaway tool use.
+Users can add their own tools directly in `agent/src/tools/` alongside the bundled custom set. agent-sdk handles the tool execution loop natively — the per-backend turn cap (default 25) prevents runaway tool use.
 
 #### Tool return shapes
 
 Tool return values get JSON-serialized and shown to the model. Two conventions:
 
-- **Tools that succeed-or-fail** (`read_file`, `write_file`, `edit_file`, `remember`, `shell`) return their result on success. On failure they may throw; the agent's tool-dispatch layer catches the error and records it as the tool result so the model sees the error message.
+- **Tools that succeed-or-fail** (`bash`, `read`, `write`, `edit`, `add_journal_entry`, etc.) return their result on success. On failure they may throw; the SDK's tool-dispatch layer catches the error and records it as the tool result so the model sees the error message.
 - **Tools that succeed-or-miss** (anything that does lookup) return a **discriminated shape** — a list (empty = miss) or a union with a boolean tag — never a bare `null`. Makes the shape unambiguous to the model and leaves room for diagnostic fields later. See `spec/tools/find_memory.md` for the canonical example.
 
-**Invariant: every tool call in the thread JSONL is paired with a tool result event.** The dispatch layer guarantees this regardless of whether the tool returned, threw, or timed out. A missing result orphans the `tool_calls` entry, and subsequent invocations can't replay the history — the LLM SDK rejects message histories with orphan tool calls, and the conversation stops responding.
-
-The invariant is achieved by wrapping each tool's `execute` at registration time with an error-catching adapter. If the underlying call throws, the adapter returns `{ error: <message> }` as the result instead of propagating the throw. This keeps the LLM SDK's normal success path — including the entry in `step.toolResults` — so the dispatch layer's `onStep` callback writes a corresponding `tool` event to the thread.
+**Invariant: every tool call in the thread JSONL is paired with a tool result event.** agent-sdk guarantees this — its event stream emits `tool_result` for every `tool_call_end`, including errors. We tee both into our threads JSONL and the pairing falls out automatically. The orphan-tool-call problem (which used to break replay against models that reject orphans) is now handled inside agent-sdk; we don't reconstruct the message array ourselves.
 
 **Skills** are markdown instruction files that teach the agent how to accomplish complex tasks using its tools. Bundled skills live in `spec/skills/{name}.md` — flat, one file per skill. Instance-specific skills live in `config/skills/`, which accepts both the same flat `{name}.md` form and the agentskills.io directory form (`{name}/SKILL.md` plus optional `scripts/`, `references/`, `assets/` sibling directories) so off-the-shelf skills drop in unmodified.
 
@@ -194,50 +201,74 @@ The skills summary in the system prompt shows both source paths for a merged ski
 
 **Identity** comes from `config/SOUL.md`, written on first run. The agent reads it on every invocation.
 
-**Long-term memory** comes from the `memory/` directory. The system prompt includes a manifest of **root-level files only** (name + summary); subfolder files are reached by following `[[wiki-links]]` from a root file. Full content is fetched on demand via `find_memory` and `read_file`. See **Memory format** below.
+**Long-term memory** comes from the `memory/` directory. The system prompt includes a manifest of **root-level files only** (name + summary); subfolder files are reached by following `[[wiki-links]]` from a root file. Full content is fetched on demand via `find_memory` and `read`. See **Memory format** below.
 
 **Self-awareness.** The agent learns about its scheduled-job invocation mode via the bundled `scheduling` skill (`spec/skills/scheduling.md`), whose name and description appear in the skills summary at startup. Without this, the agent doesn't know cron exists and may tell the user it can't reach out proactively — which is wrong; cron firings are exactly the proactive-outreach mechanism.
 
 #### Model selection
 
-The agent supports multiple LLMs through named **profiles** in `config/models.yaml`. Each profile names a provider, a model ID, and credentials; callers (channels, cron jobs, `delegate_task`) reference profiles by name.
+The agent supports multiple LLMs through named **profiles** in `config/models.yaml`. Each profile names a backend, a model ID, and any backend-specific config; callers (channels, cron jobs, `delegate_task`) reference profiles by name.
 
 ```yaml
 # config/models.yaml
 default:
-  provider: anthropic
+  backend: claude
   model: claude-sonnet-4-6
-  api_key: $ANTHROPIC_API_KEY
-  temperature: 0.7
-  fallback: fast
-subagent: fast              # string value = pointer to another profile
+  fallback: backup-via-api
+
 fast:
-  provider: anthropic
+  backend: claude
   model: claude-haiku-4-5
-  api_key: $ANTHROPIC_API_KEY
+
 reasoning:
-  provider: openai
+  backend: codex
   model: gpt-5
-  api_key: $OPENAI_API_KEY
+
+hosted-tools:
+  backend: openai-agents
+  model: gpt-5
+
 local:
+  backend: vercel
   provider: openai-compatible
   base_url: http://localhost:11434/v1
   model: llama3.1
+
+backup-via-api:
+  backend: vercel
+  provider: anthropic
+  api_key: $ANTHROPIC_API_KEY
+  model: claude-sonnet-4-6
+
+subagent: fast              # string value = pointer to another profile
 ```
 
 **Pointers and inline definitions.** Every top-level entry is either a full profile (an object) or a pointer (a string naming another entry). `default` and `subagent` are conventional names — `default` is the fallback choice when nothing more specific is requested; `subagent` is the default for `delegate_task`. Either may be defined inline or as a pointer.
 
-**Providers.** Three provider values are supported:
+**Backends.** Each profile names one of four backends. agent-sdk handles dispatch; protos cares about which one is named because that determines auth and tool availability.
 
-- `anthropic` — Anthropic's API (`@ai-sdk/anthropic`). Requires `api_key:`.
-- `openai` — OpenAI's API (`@ai-sdk/openai`). Requires `api_key:`.
-- `openai-compatible` — any OpenAI-compatible HTTP endpoint (Ollama, LM Studio, llama.cpp server, vLLM, …) via `@ai-sdk/openai-compatible`. Requires `base_url:`; `api_key:` is optional — most local servers ignore auth, but may be set for authenticated proxies.
+- **`claude`** — Claude Agent SDK. ChatGPT-style subscription via `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token` once) or API key via `ANTHROPIC_API_KEY`. Native sandboxed `Bash`, tuned `Read`/`Write`/`Edit`, native `Task`/`TodoWrite`/`webSearch`/`webFetch`.
+- **`codex`** — Codex AppServer (`codex app-server`). ChatGPT subscription via `~/.codex/auth.json` (run `codex login` once) or `OPENAI_API_KEY`. Native `apply_patch` editing, native `plan` (todo) and `collabAgentToolCall` (task).
+- **`openai-agents`** — OpenAI Agents SDK (`@openai/agents`). API-key only (`OPENAI_API_KEY`). Adds OpenAI's hosted tools (`web_search`, `code_interpreter`, `image_generation`, `file_search`, `computer_use`) and built-in tracing.
+- **`vercel`** — Vercel AI SDK Agent. Provider-portable: `anthropic`, `openai`, or `openai-compatible` (Ollama, LM Studio, llama.cpp server, vLLM). Per-profile `api_key:`. Bundled in-process tool implementations; `webSearch` is a silent no-op until a `withImpls` provider is wired.
 
-Tool-use support varies across local models; if an `openai-compatible` profile struggles with tool calling, route the specific calls that need it (via channel/cron `model:` or `delegate_task` `model:`) to a cloud profile and keep local for simpler text tasks.
+| Field | `claude` | `codex` | `openai-agents` | `vercel` |
+|---|---|---|---|---|
+| `backend` | required | required | required | optional (default if `provider:` is set) |
+| `model` | required | required | required | required |
+| `provider` | n/a | n/a | n/a | required (`anthropic`/`openai`/`openai-compatible`) |
+| `api_key` | n/a (env) | n/a (env or auth.json) | n/a (env) | required for hosted; optional for `openai-compatible` |
+| `base_url` | n/a | n/a | n/a | required for `openai-compatible` |
+| `temperature` | passes through | passes through | passes through | passes through |
+| `fallback` | works | works | works | works |
+
+`codex` and `openai-agents` both target OpenAI models but are not interchangeable: `codex` is the subscription path, `openai-agents` is the API-key path with hosted tools and tracing. Codex API mode and OpenAI Agents share `OPENAI_API_KEY`.
+
+Tool-use support varies across local models; if an `openai-compatible` profile struggles with tool calling, route the specific calls that need it (via channel/cron `model:` or `delegate_task` `model:`) to a hosted profile and keep local for simpler text tasks.
 
 **Env-var substitution.** Any string field accepts `$NAME` as a whole-string value; the loader replaces it with `process.env.NAME`. Missing env vars error at load, naming the file path and variable. This lets users who want to commit `models.yaml` keep credentials in `.env`; users who don't mind can inline values.
 
-**Fallback.** A profile's `fallback:` names another profile. When a call against a profile errors with a credit-exhausted, rate-limit, provider 5xx, or connection error (ECONNREFUSED, timeout), the runtime retries the same call against the fallback. Connection errors are included so a "local-first, cloud-as-backup" setup — an `openai-compatible` default with a cloud profile as its `fallback:` — works when the local server is down. **Auth errors do NOT fall back** — they're config bugs and silent fallback hides them. One hop only; cycles detected at load.
+**Fallback.** A profile's `fallback:` names another profile. When a call against a profile errors with a credit-exhausted, rate-limit, provider 5xx, or connection error (ECONNREFUSED, timeout), the runtime retries the same call against the fallback — even if the fallback is a different backend. Connection errors are included so a "local-first, cloud-as-backup" setup — a `vercel` openai-compatible default with a `claude` profile as its `fallback:` — works when the local server is down. **Auth errors do NOT fall back** — they're config bugs and silent fallback hides them. One hop only; cycles detected at load.
 
 **Selection precedence.**
 
@@ -247,13 +278,20 @@ Tool-use support varies across local models; if an `openai-compatible` profile s
 
 **Hints vs. directives.** Channel `model:`, cron `model:`, explicit `delegate_task` `model:`, and profile `fallback:` are **directives** — an unknown profile errors (at load for static references, at call time for dynamic). Skill `preferred_model:` is a **hint** — if the named profile doesn't exist, the preference is silently skipped and resolution continues (next skill's preference, else `subagent`). This lets skills ship with reasonable preferences without forcing every user to define a matching profile.
 
-**Validation at load.** The loader validates every profile resolves (no unknown pointers, no cycles); every resolved profile has a valid provider + model after env substitution, with credentials as required by the provider (`api_key:` for `anthropic`/`openai`; `base_url:` for `openai-compatible`, with `api_key:` optional); and every directive reference (channel `model:` in `channels.yaml`, cron `model:` in merged frontmatter, profile `fallback:`) points at an existing profile. Skill `preferred_model:` is a hint and is NOT validated at load. Today "load" = startup; validation failures exit the process non-zero with a message naming the file and the offending reference. If reload is added later, the same validation runs each time.
+**Validation at load.** The loader validates every profile resolves (no unknown pointers, no cycles); every resolved profile has a valid backend + model after env substitution, with backend-required fields present (e.g. `provider:` and `base_url:` for `vercel` openai-compatible) and unknown-for-this-backend fields rejected; required environment variables are present per backend (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` for `claude`; `OPENAI_API_KEY` or `~/.codex/auth.json` for `codex`; `OPENAI_API_KEY` for `openai-agents`); and every directive reference (channel `model:` in `channels.yaml`, cron `model:` in merged frontmatter, profile `fallback:`) points at an existing profile. Skill `preferred_model:` is a hint and is NOT validated at load. Today "load" = startup; validation failures exit the process non-zero with a message naming the file and the offending reference.
 
-**Temperature** is a per-profile field. Other knobs (max tokens, thinking budget, …) can be added later — keep the schema minimal until there's demand.
+**Per-process auth caveat.** Two `claude` profiles in one daemon share `CLAUDE_CODE_OAUTH_TOKEN` (same for two `codex` profiles, or `OPENAI_API_KEY` between codex API mode and openai-agents). Per-profile API keys work only on the `vercel` backend. Fine for protos's single-user model; document if multi-account support becomes interesting.
+
+**Temperature** is a per-profile field. Other knobs (max tokens, thinking budget, context-window override, …) can be added later — keep the schema minimal until there's demand.
 
 #### Sub-agents
 
-The agent can spawn focused sub-agents via the `delegate_task` tool. A sub-agent is a separate `generateText` invocation with:
+The agent can spawn focused sub-agents two ways:
+
+- **`task`** (canonical) — agent-sdk's tuned sub-agent primitive: `Task` on Claude, `collabAgentToolCall` on Codex, `Agent.asTool` on OpenAI Agents, special-cased child runner on Vercel. Use when the model wants a focused worker without protos's skill-list/tool-allowlist conventions.
+- **`delegate_task`** (custom) — protos's skill-aware sub-agent. Caller provides explicit `skills: string[]`, `tools: string[]`, and optional `model:`. The skill bodies are inlined; the tool allowlist is enforced; the sub-agent log lands at the protos path layout (below). Skill `preferred_model:` resolution applies here.
+
+A `delegate_task` sub-agent is a separate `agent.run()` invocation with:
 
 - A task-specific prompt (written by the main agent at call time)
 - An explicit list of skills (full skill bodies inlined into its system prompt)
@@ -335,7 +373,7 @@ In both cases, intermediate events (multi-step assistant text, tool calls, tool 
 
 ### 5. Self-modification
 
-The agent can edit its own source code (`agent/src/`) via its file-edit tools (`write_file`, `edit_file`). TypeScript runs directly with `tsx` — no build step. To apply code changes, the agent restarts itself using the `agent/protos restart` wrapper script.
+The agent can edit its own source code (`agent/src/`) via the canonical `write` and `edit` tools. TypeScript runs directly with `tsx` — no build step. To apply code changes, the agent restarts itself using the `agent/protos restart` wrapper script.
 
 **Safe-edit protocol:**
 
@@ -345,15 +383,14 @@ The agent can edit its own source code (`agent/src/`) via its file-edit tools (`
 
 This closes the three failure modes for self-edit: compile errors (caught by typecheck), runtime startup errors (caught by post-start health check + auto-revert), and subtle logic bugs (can be manually reverted via `git` from the running agent).
 
-**Disabling self-edit:** set `PROTOS_SELF_EDIT=false` in `config/.env`. When disabled:
+**Path discipline.** With native tools, protos no longer wraps `execute` to enforce path guards — the canonical tools come directly from agent-sdk. Discipline is convention plus OS-level enforcement:
 
-- The `self-edit` skill is hidden from the agent (skills loader skips it).
-- `write_file` and `edit_file` reject any path that resolves under `agent/` with a clear error.
-- The `shell` tool gets a warning appended to its description: "self-edit is disabled; do not modify files under `agent/`." This is a nudge, not enforcement — the shell tool can still technically write anywhere the process user can.
+- **System prompt reinforces convention** — `spec/` is the design (shared, read-only at runtime); `agent/` is the implementation (editable via the self-edit skill).
+- **`chmod -R a-w spec/`** — recommended for production. The kernel refuses writes regardless of which tool issues them.
+- **`chmod -R a-w agent/`** — to disable self-edit entirely. Pair with hiding the `self-edit` skill (the skills loader can be configured to skip a named skill via `config/skills/self-edit.md` with `enabled: false`).
+- **Optional `git revert spec/` after each turn** — cron-driven or post-dispatch. Cheap, catches stray writes that landed before chmod could have stopped them.
 
-This is **safety by convention plus tool guards** — enough to prevent accidental or unprompted self-edit. For guaranteed enforcement (e.g. against an adversarial or confused agent), run the process in an OS-level sandbox with `agent/` and `spec/` mounted read-only.
-
-Default is `PROTOS_SELF_EDIT=true`. The capability exists and is well-guarded; users nervous about it flip one env var.
+For guaranteed enforcement against an adversarial agent, run the process in an OS-level sandbox with `agent/` and `spec/` mounted read-only.
 
 `spec/` is not edited by the running agent. Spec changes are made by humans (or coding agents like Claude Code) and applied by asking a coding agent to update `agent/` to match.
 
@@ -363,7 +400,17 @@ Everything is plain files — no database. Files break down by domain:
 
 ### Message history (`runtime/threads/`)
 
-One JSONL file per conversation, at `runtime/threads/{channelId}/{conversationId}.jsonl`. Each line is one **event** — a single LLM message in the AI SDK `CoreMessage` shape.
+One JSONL file per `(conversation, profile)` pair, at `runtime/threads/{channelId}/{conversationId}/{profile}.jsonl`. Each line is one **event** teed from agent-sdk's `query.events` stream. A `{profile}.continuation` sidecar in the same directory holds the active backend session token.
+
+```
+runtime/threads/telegram/12345/
+  default.jsonl          # canonical event log for the default profile
+  default.continuation   # backend session token for resuming default
+  fast.jsonl
+  fast.continuation
+```
+
+The user-facing conversation is the merged view of all `*.jsonl` files in the directory, ordered by `timestamp`. See [Session continuity](#session-continuity) below for how we resume across profile switches.
 
 #### Event schema
 
@@ -379,9 +426,9 @@ type ToolCall = { id: string, tool: string, args: unknown }
 type Attachment = { type: "image", path: string, media_type: string }
 ```
 
-Snake_case throughout the wire format. Tool calls are bundled with the assistant message they were part of via a flat `tool_calls` field (mirroring AI SDK and Anthropic API conventions). Tool results are separate events with `role: "tool"`. The optional `sub_agent_log` field on a tool result points to a nested log file; see [Sub-agents](#sub-agents). The optional `attachments` field on user events points to media blobs in `runtime/blobs/`; see [Attachments](#attachments-runtimeblobs).
+Snake_case throughout. Events are derived from agent-sdk's typed `AgentEvent` stream by a tee layer in `agent/src/threads.ts` — every `text_end`, `tool_call_end`, `tool_result`, and inbound user message becomes a row. Tool calls are bundled with the assistant message they were part of via a flat `tool_calls` field. Tool results are separate events with `role: "tool"`. The optional `sub_agent_log` field on a tool result points to a nested log file; see [Sub-agents](#sub-agents). The optional `attachments` field on user events points to media blobs in `runtime/blobs/`; see [Attachments](#attachments-runtimeblobs).
 
-`role: "audit"` is distinct from AI SDK's `role: "system"` — LLM-oriented roles (`user`, `assistant`, `tool`) feed the context reconstruction; `audit` events exist only for human/operator record-keeping and are skipped by `buildLlmMessages`. `assistant.text` may be an empty string when a step produced only tool calls; the render filter skips such events when searching for the last assistant text of a turn.
+`role: "audit"` events (`cron_start`/`cron_end`) exist for human/operator record-keeping and never round-trip through agent-sdk. `assistant.text` may be an empty string when a step produced only tool calls; the render filter skips such events when searching for the last assistant text of a turn.
 
 #### `turn_id`
 
@@ -389,22 +436,66 @@ Every event produced by a single agent invocation shares one `turn_id`. A user m
 
 `turn_id` exists for **rendering**: each channel decides what to show per turn (default: only the last assistant text of the turn — see channel recipes for specifics). It is NOT used by the LLM context builder, which preserves the full event sequence regardless.
 
-#### LLM context (replay)
+#### Session continuity
 
-When the agent runs, the router reads the JSONL and reconstructs a `CoreMessage[]` to pass to `generateText`. **Each event becomes one CoreMessage in original order** — so the model sees exactly the sequence it generated against, including tool calls and results from prior turns. This is the correctness reason tool calls are persisted: an assistant turn that ended with a tool call must be followed by the tool result before the next assistant message, or the model has no record of what it did.
+Each backend owns conversation-context reconstruction via its own continuation tokens. Protos owns the durable thread record at the path above and tees events from `agent.events` into JSONL. We never reconstruct a message array ourselves.
 
-**Send-time annotations on user messages.** During reconstruction, every user event's `text` is prefixed with a `[sent YYYY-MM-DD HH:MM:SS ZZZ]` marker derived from its `timestamp` field, formatted in the owner's local timezone. Get the timezone from `Intl.DateTimeFormat().resolvedOptions().timeZone` and format the zone as a short abbreviation (e.g. `PDT`, `EST`, `UTC`). This gives the model a "when" for every user message, and because the latest user message is at the end of the prompt, that message's timestamp also serves as the model's "now" for any duration calculations the user asks about ("how long since I said X?"). Assistant events are NOT prefixed — the model can infer its own timing from the bounding user messages, and the asymmetric format discourages the model from mimicking the prefix in its own replies.
+**One continuation active per dispatch, one continuation kept per profile across switches.** The `{profile}.continuation` sidecar holds the most recent `session_start.continuation` token for that profile; it's read on resume and rewritten whenever a fresh session is started.
 
-**Attachments on user messages.** If a user event has `attachments`, the reconstructed CoreMessage becomes a content-parts array: the `[sent …]`-prefixed text as the first text part, followed by one image part per attachment (loaded from its `path`). Events without attachments stay as plain string content. The AI SDK accepts both shapes per message.
+**The five cases** the dispatcher handles:
 
-**Replay safety.** When loading an attachment's bytes during reconstruction, verify the resolved absolute path is under `runtime/blobs/` — reject anything that escapes (e.g. a crafted `path: "../etc/passwd"` would otherwise read host files into the prompt). The existing path helper handles this; just call it. **Missing blobs** (cleanup, partial sync, machine swap) get replaced with a `[image unavailable: <path>]` text part and a logged warning; the rest of the conversation continues. Don't fail the whole call — a missing blob from months ago shouldn't break today's reply.
+1. **Cold start** — directory empty. `agent.run({ message })` no continuation. Save the resulting token to `{profile}.continuation`. Append events to `{profile}.jsonl`.
+2. **Same-profile resume** — `{profile}.continuation` exists. Pass token: `agent.run({ message, continuation })`. Backend resumes from native storage (Claude/Codex SDK files; agent-sdk's session JSONL on Vercel/OpenAI Agents).
+3. **Profile switch forward** (fresh into a not-yet-seen profile) — compute the recap from other profiles' tails, prepend to the user message, call `agent.run({ message: <recap + actual> })`, save new continuation.
+4. **Profile switch back** (`{profile}.continuation` exists, but other profiles have run since) — compute the gap (events with `timestamp > T_{profile}_last` from other profiles' JSONLs), prepend recap to user message, call `agent.run({ message, continuation })`. Resume the prior session AND inject the gap context.
+5. **Continuation invalid** — backend signals `isContinuationInvalid(err)`; clear the sidecar and retry as case 3.
+
+**Gap detection.** Read the last event timestamp from `{profile}.jsonl` (`T_last`). Read events from every other profile's JSONL where `timestamp > T_last`. Merge by timestamp. Cap at last 10 events; verbatim text (no summarization for v1).
+
+**Recap format.** In-message prepend, never written to threads JSONL. Plain readable format:
+
+```
+While you were inactive, conversation continued on profile `fast`. Recent turns:
+
+  user (14:32 PDT): when does the train leave?
+  fast (14:32 PDT): 4:15 PDT.
+  user (14:48 PDT): thanks, how long is the ride?
+  fast (14:48 PDT): about 2 hours.
+
+[sent 2026-04-25 15:01:12 PDT] is there a dining car?
+```
+
+The actual user message keeps its existing `[sent …]` prefix as the boundary cue. Indented gap turns use `role (time): text` — no fake `[sent …]` headers competing with the convention. For case 3 (no prior session), reword the intro to "Recent conversation activity (other profiles):" — no "while you were inactive" framing since there's no prior session.
+
+**Recap is runtime-only.** The recap header gets prepended to the `message` field passed to `agent.run`. It is NOT written to `{profile}.jsonl`. The user event in the JSONL records only what the user actually typed. Otherwise the recap would appear on render/replay as a fake user soliloquy, and future gap calculations would treat it as real conversation, compounding.
+
+**Render across profiles.** Channel render reads ALL `*.jsonl` files in the directory and merges by `timestamp`. Users see one continuous conversation regardless of which profile served which turn. Memory consolidation (nap/dream) reads the same merged view.
+
+**Send-time annotations on user messages.** Every user message we hand to `agent.run` gets prefixed with a `[sent YYYY-MM-DD HH:MM:SS ZZZ]` marker derived from the current timestamp, formatted in the owner's local timezone. Get the timezone from `Intl.DateTimeFormat().resolvedOptions().timeZone` and format the zone as a short abbreviation (e.g. `PDT`, `EST`, `UTC`). This gives the model a "when" for the latest user message, which doubles as its "now" for any duration calculations ("how long since I said X?"). Assistant events are NOT prefixed — the model can infer its own timing from the bounding user messages, and the asymmetric format discourages the model from mimicking the prefix in its own replies.
+
+**Attachments on user messages.** If a user event has `attachments`, we pass them via `QueryInput.attachments` (agent-sdk handles the per-backend wire format). For local blobs we use `{type: 'image', source: {kind: 'path', path: '<runtime/blobs/...>'}}`.
+
+**Replay safety.** When passing an attachment to agent-sdk, verify the resolved absolute path is under `runtime/blobs/` — reject anything that escapes (e.g. a crafted `path: "../etc/passwd"` would otherwise read host files). **Missing blobs** (cleanup, partial sync, machine swap) get replaced with a `[image unavailable: <path>]` text part and a logged warning; the rest of the conversation continues. Don't fail the whole call.
+
+**Image events in the gap.** If the gap recap includes user events with `attachments`, the recap text mentions them as `[user sent a photo]` rather than re-embedding the bytes. Image bytes remain in our JSONL for human replay; the next turn can re-share if needed.
+
+**Where each backend stores its own session record:**
+
+| Profile | Backend reads on resume | Backend writes during turn |
+|---|---|---|
+| `claude` | `~/.claude/projects/.../{session-id}.jsonl` (Claude SDK's storage) | Same |
+| `codex` | `~/.codex/sessions/...` + sqlite | Same |
+| `openai-agents` | `runtime/sessions/openai-agents/{continuation}.jsonl` (`AgentInputItem` lines) | Appends `AgentInputItem` rows |
+| `vercel` | `runtime/sessions/vercel/{continuation}.jsonl` (UIMessage) | Appends UIMessage rows |
+
+The SDK's session storage is opaque to protos — never read or written directly. Our threads JSONL is the canonical durable record.
 
 #### Append cadence and writers
 
-- **Append-only writes.** The router serializes per-conversation, so there's never a concurrent writer on the same file.
-- Each event is appended as it happens (user message → user event; assistant step → assistant event; tool call → tool event). One agent invocation typically appends multiple events.
-- **Reads** load the whole file and parse it line-by-line; for a personal assistant this is fine even across years of conversation.
-- **Backup** is copying both `runtime/threads/` and `runtime/blobs/` together. The threads JSONL references blobs by path; without the bytes, replay produces missing-blob warnings rather than the original images.
+- **Append-only writes.** The router serializes per-conversation, so there's never a concurrent writer on the same `(channelId, conversationId)` directory.
+- Each event is appended to its profile's JSONL as it streams from `agent.events`. One agent invocation typically appends multiple events to a single `{profile}.jsonl`.
+- **Reads** load the whole directory and parse line-by-line, merging across profiles by timestamp. For a personal assistant this is fine even across years of conversation.
+- **Backup** is copying both `runtime/threads/` and `runtime/blobs/` together. The threads JSONL references blobs by path; without the bytes, replay produces missing-blob warnings rather than the original images. `runtime/sessions/` is also worth backing up if you want the Vercel/OpenAI Agents backends to truly resume sessions across machines — without it, the next turn falls into case 5 (continuation invalid) and runs as a fresh session with a recap.
 
 ### Attachments (`runtime/blobs/`)
 
@@ -420,7 +511,7 @@ Blobs are kept indefinitely — there is no automatic retention. Modern phone ph
 
 One JSONL file per cron run, at `runtime/logs/cron/{jobname}/{ISO-timestamp}.jsonl`. Uses the [same event schema](#event-schema) as threads, with `cron_start` and `cron_end` audit events bracketing the run. For `history: none` jobs (dream, nap) the cron log is the primary audit trail; for `history: primary` jobs (heartbeat) the cron log is an additional record — the same agent/tool events also land in the user's thread. See [Scheduler](#4-scheduler) for which events go where.
 
-No retention policy — kept forever. Small text, useful for the agent to reflect on past runs via `read_file`.
+No retention policy — kept forever. Small text, useful for the agent to reflect on past runs via `read`.
 
 ### Identity, behavior, memory, ephemeral
 
@@ -436,7 +527,7 @@ All plain files spread across the domains:
 - **`memory/journal/`** — daily scratch pad files (e.g., `memory/journal/2026-03-09.md`). The agent jots notes throughout the day; the `dream` cron promotes important items into the rest of `memory/`.
 - **`memory/new/`** — inbox folder. The agent writes new notes here when there's no obvious folder yet (use `add_memory("new/{name}", content)`). The `dream` cron sorts the inbox into appropriate folders. Prefer confident placement (`add_memory` directly into the right folder) when you know where it belongs; use the inbox only when genuinely unsure.
 - **`memory/archive/`** — cold storage for content `dream` decided isn't currently useful but might be worth keeping. Exempt from the orphan check — things here don't need to be reachable from a root file. Use `rename_memory("{name}", "archive/{name}")` to move something into the archive.
-- **`runtime/`** — `threads/` (conversation JSONLs + per-thread consolidation cursor sidecars), `logs/cron/{jobname}/{ISO}.jsonl` (one per cron run), `logs/cron/{jobname}/{ISO}/{call_id}.jsonl` (sub-agent logs), `logs/sub-agents/` (thread-originated sub-agent logs — see [Sub-agents](#sub-agents)), `*.pid`, `memory-graph.json` (backlink cache). See **Memory consolidation** below for cursor details.
+- **`runtime/`** — `threads/` (per-conversation directories of `{profile}.jsonl` + `{profile}.continuation` sidecars + per-profile consolidation cursors), `sessions/{vercel,openai-agents}/{continuation}.jsonl` (agent-sdk session storage for backends without their own), `logs/cron/{jobname}/{ISO}.jsonl` (one per cron run), `logs/cron/{jobname}/{ISO}/{call_id}.jsonl` (sub-agent logs), `logs/sub-agents/` (thread-originated sub-agent logs — see [Sub-agents](#sub-agents)), `*.pid`, `memory-graph.json` (backlink cache). See **Memory consolidation** below for cursor details.
 
 ## Memory format
 
@@ -478,7 +569,7 @@ Forward links use the wiki-link syntax:
 3. If multiple matches: pick the **shortest path**, then alphabetical
 4. If no match: return no target (no auto-creation). The agent decides whether to create a file via `add_memory` and where to put it. This matches Obsidian's spirit — Obsidian only creates a target file when the user *clicks* a missing link, not when one is parsed.
 
-**Resolution preservation on changes.** When a file is created, renamed, or moved, bare-name links (`[[coffee]]`) can silently change which file they resolve to — another file with the same basename might now win the shortest-path tiebreak, or the shadowed file might get un-shadowed. The `add_memory` and `rename_memory` tools handle this by snapshotting the full resolution map before the change and rewriting any reference whose resolved target would change after the change. Raw `write_file(mode: "create")` under `memory/` does NOT run this preservation step — prefer `add_memory` for any memory-file creation that could introduce name shadowing.
+**Resolution preservation on changes.** When a file is created, renamed, or moved, bare-name links (`[[coffee]]`) can silently change which file they resolve to — another file with the same basename might now win the shortest-path tiebreak, or the shadowed file might get un-shadowed. The `add_memory` and `rename_memory` tools handle this by snapshotting the full resolution map before the change and rewriting any reference whose resolved target would change after the change. The canonical `write` tool under `memory/` does NOT run this preservation step — prefer `add_memory` for any memory-file creation that could introduce name shadowing.
 
 ### Backlinks
 
@@ -494,7 +585,7 @@ Memory is **not loaded eagerly** into the system prompt. Instead, the system pro
 2. The first H1 heading in the body
 3. The first ~100 characters of body text
 
-The manifest gives the agent enough context to know what high-level topics exist. The agent uses `find_memory` and `read_file` to fetch full content on demand, based on conversation context.
+The manifest gives the agent enough context to know what high-level topics exist. The agent uses `find_memory` and `read` to fetch full content on demand, based on conversation context.
 
 **Root-level files act as entry points.** Memory is organized so that anything important is reachable from a root file via `[[wiki-links]]` (transitively). Subfolder files exist for organization but are never surfaced in the manifest — the agent finds them by following links from root files. This is the standard "Map of Content" pattern: root files are the front page; deep files live in folders but are linked from above.
 
@@ -517,7 +608,7 @@ Conversation threads are append-only and grow forever. To keep the agent's worki
 
 Both jobs run with `history: none`: the agent's context for the invocation starts clean (no prior conversation history is loaded), so the consolidation work doesn't need to be isolated in a sub-agent — the cron invocation itself is already an isolated context. Only the final summary reply lands in the user's thread.
 
-**Consolidation cursors.** A per-thread cursor records how many messages have been consolidated into memory. Stored as a sidecar file next to the thread JSONL: `runtime/threads/{channelId}/{conversationId}.cursor` containing a single integer (the count of consolidated messages from the start of the file). Both `nap` and `dream` read and update these cursors so neither re-consolidates content the other has already processed. Cursors live in `runtime/` intentionally — they share the lifecycle of the threads they describe. Wiping `runtime/` (the documented "rebuild from scratch" action) drops both the threads and their cursors together; there's nothing left to consolidate, and nothing gets re-consolidated by accident.
+**Consolidation cursors.** Per-thread, per-profile cursors record how many messages have been consolidated into memory. Stored as sidecar files in the conversation directory: `runtime/threads/{channelId}/{conversationId}/{profile}.cursor`, each containing a single integer (the count of consolidated messages from the start of that profile's JSONL). Consolidation walks the merged event view (across all profiles in the directory), tracks which profile each event came from, and advances each profile's cursor as it processes. Both `nap` and `dream` read and update these cursors so neither re-consolidates content the other has already processed. Cursors live in `runtime/` intentionally — they share the lifecycle of the threads they describe. Wiping `runtime/` (the documented "rebuild from scratch" action) drops the threads and their cursors together.
 
 **Thread context at runtime is unchanged.** The agent always sees the most recent N messages of the active thread (capped at the token budget). Consolidated older content reaches the agent through the memory manifest, not through any thread-content rewriting. The thread is "what's happening now"; memory is "what I know."
 
@@ -526,7 +617,7 @@ Both jobs run with `history: none`: the agent's context for the invocation start
 On startup, the agent checks for `config/SOUL.md`. If it doesn't exist:
 
 1. The agent introduces itself as a blank Protos and asks the user for a name and personality.
-2. The agent writes `config/SOUL.md` with the chosen identity (using `write_file` with `mode: "create"`).
+2. The agent writes `config/SOUL.md` with the chosen identity (using `write`).
 3. Subsequent startups read the populated file.
 
 The agent also creates `config/`, `memory/`, and `runtime/` directories on first run if they don't exist.
@@ -564,17 +655,12 @@ spec/
     terminal.md       # local client-server chat over Unix socket
     whatsapp.md
     ...
-  tools/              # tool recipes (markdown only)
-    read_file.md
-    write_file.md
-    edit_file.md
+  tools/              # tool recipes for the protos-specific custom tools (canonical tools live in agent-sdk)
     find_memory.md
     add_memory.md          # memory-aware create + resolution preservation
     rename_memory.md       # memory-aware rename + resolution preservation
-    remember.md
-    shell.md
-    delegate_task.md       # sub-agent runner
-    web_fetch.md           # privacy-aware web fetch
+    add_journal_entry.md   # append timestamped line to today's journal
+    delegate_task.md       # protos's skill-aware sub-agent
     list_threads.md        # consolidation: enumerate threads with cursor state
     read_thread_tail.md    # consolidation: read messages since cursor
     advance_thread_cursor.md  # consolidation: mark messages consolidated
@@ -612,23 +698,17 @@ agent/
       terminal-protocol.ts  # shared JSON message shapes (server + cli/chat.ts)
       telegram.ts
       ...
-    tools/            # built-in + custom tools
-      read_file.ts
-      write_file.ts
-      edit_file.ts
+    tools/            # protos-specific custom tools (canonical tools come from agent-sdk)
       find_memory.ts
       add_memory.ts
       rename_memory.ts
-      remember.ts
-      shell.ts
+      add_journal_entry.ts
       delegate_task.ts
-      web_fetch.ts
       list_threads.ts
       read_thread_tail.ts
       advance_thread_cursor.ts
       find_orphans.ts
-    paths.ts          # shared path resolution + write guards
-    agents/           # sub-agent runner (single generic file, no per-agent definitions)
+    agents/           # delegate_task sub-agent runner (single generic file, no per-agent definitions)
       runner.ts
 
 # Behavior — gitignored, optionally a separate repo.
@@ -659,11 +739,25 @@ vendor/
 
 # Ephemeral — gitignored, never a repo
 runtime/
-  threads/            # one JSONL file per conversation
+  threads/            # one directory per conversation, one JSONL per (conversation, profile)
     telegram/
-      12345.jsonl
+      12345/
+        default.jsonl
+        default.continuation
+        default.cursor          # consolidation cursor for this profile
+        fast.jsonl
+        fast.continuation
+        fast.cursor
     terminal/
-      cli.jsonl       # persistent CLI chat thread
+      cli/
+        default.jsonl
+        default.continuation
+        default.cursor
+  sessions/           # agent-sdk session storage (Vercel + OpenAI Agents own these; Claude/Codex don't)
+    vercel/
+      {continuation}.jsonl
+    openai-agents/
+      {continuation}.jsonl
   blobs/              # content-addressed media (sha256-named) referenced by thread events
   clients/            # per-client cursor files
     chat.cursor       # default terminal client
@@ -769,7 +863,7 @@ cd memory && git init  # commits happen as the agent learns
 ## Security considerations
 
 - The agent runs with shell access and the same permissions as the host user. Consider running it on a dedicated machine or in a container.
-- The **shell tool** runs commands using bash from the workspace root with a 1 MB output limit. The agent should confirm destructive commands with the user before running them.
+- The canonical **`bash` tool** runs commands using bash from the workspace root. On Claude/Codex it runs sandboxed natively; on Vercel/OpenAI Agents agent-sdk's bundled impl runs in-process. The agent should confirm destructive commands with the user before running them.
 - **Never log credentials.** When catching errors, log only the error message — not full objects, which may contain API tokens or bot secrets.
 - Secrets live in `config/models.yaml` and `config/channels.yaml` (inline, or referenced via `$NAME` substitution from `config/.env`).
 - The thread files in `runtime/threads/` contain all your messages — protect that directory accordingly.
