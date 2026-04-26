@@ -7,11 +7,11 @@ description: Modify the agent's own source code and safely restart to apply chan
 
 You can modify your own source code in `agent/src/`. The process is designed to be safe: compile errors are caught before restart, runtime startup crashes auto-revert the edit.
 
-If this skill is visible to you at all, self-edit is enabled (the skill is hidden when `PROTOS_SELF_EDIT=false`).
+If this skill is visible to you at all, self-edit is enabled (the skill is hidden when `enabled: false` is set in `config/skills/self-edit.md` or when `agent/` has been chmod'd read-only).
 
 ## Steps
 
-1. **Make your code changes** using `edit_file` (surgical find-and-replace) or `write_file` (for whole-file changes or new files). Prefer `edit_file` when possible — smaller, safer.
+1. **Make your code changes** using `edit` (surgical find-and-replace) or `write` (for whole-file changes or new files). Prefer `edit` when possible — smaller, safer.
 2. **Commit the change** using the **git** skill. One commit per edit, with a clear message explaining what changed and why. This enables rollback if the restart fails.
 3. **Send a message to the conversation** explaining what you changed and why.
 4. **Run `agent/protos restart`** as your **last action**.

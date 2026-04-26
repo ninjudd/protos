@@ -6,7 +6,7 @@ preferred_model: reasoning
 
 # Coding
 
-For complex, multi-file, or unfamiliar coding tasks, delegate to a coding agent rather than hand-editing with shell commands.
+For complex, multi-file, or unfamiliar coding tasks, delegate to a coding agent rather than hand-editing with the canonical `edit` / `write` tools or shell commands.
 
 ## When to use this
 
@@ -41,7 +41,7 @@ codex --approval-mode full-auto "your prompt here"
 
 1. Confirm the task with the owner — what to build, where it should go, any constraints
 2. Craft a clear, detailed prompt describing the task
-3. Run the coding agent via your shell tool
+3. Run the coding agent via your `bash` tool
 4. Review the output and report back to the owner what was built or changed
 
 ## Rules

@@ -5,7 +5,7 @@ description: Commit, branch, push, and create pull requests.
 
 # Git
 
-You can manage the repository using your shell tool.
+You can manage the repository using your `bash` tool.
 
 ## Setup
 

@@ -12,7 +12,7 @@ The shared pattern for turning conversation thread content into structured long-
 1. **`list_threads({ min_unconsolidated? })`** — get threads with pending work. Defaults to `min_unconsolidated: 1` (any unconsolidated message). Raise the threshold to match your scope (e.g. `50` for `nap`-style opportunistic consolidation).
 2. For each thread you want to consolidate:
    1. **`read_thread_tail(channelId, conversationId)`** → `{ messages, newCursor }`. The messages are everything since the cursor.
-   2. **Distill** the messages into memory. Update existing files (`edit_file` or `write_file` with `mode: "replace"`), create new ones (`add_memory`), use `[[wiki-links]]` to connect notes, drop transient or routine content.
+   2. **Distill** the messages into memory. Update existing files (canonical `edit` or `write`), create new ones (`add_memory`), use `[[wiki-links]]` to connect notes, drop transient or routine content.
    3. **`advance_thread_cursor(channelId, conversationId, cursor: newCursor)`** — only after the distillation succeeded. Skip on failure; the messages will reappear in the next pass.
 
 That's it. The cursor mechanics are mindless once you use the tools.
@@ -39,8 +39,8 @@ Memory is an Obsidian-compatible graph: markdown files, `[[wiki-links]]` to conn
 - The system prompt only sees **root-level** files (`memory/*.md`). Anything important must be transitively reachable from a root file via `[[wiki-links]]`.
 - Each file's frontmatter `description:` is what surfaces in the manifest. Make it clear and retrievable.
 - When new information contradicts old, update or remove the stale entry rather than letting both coexist.
-- When creating a new memory file, use `add_memory` rather than raw `write_file(mode: "create")` — `add_memory` preserves `[[wiki-link]]` resolutions the new file would otherwise shadow.
-- When reorganizing, use `rename_memory` instead of `write_file` + `read_file` + delete — it moves the file AND rewrites `[[wiki-links]]` so every reference resolves to the same file it did before.
+- When creating a new memory file, use `add_memory` rather than raw `write` — `add_memory` preserves `[[wiki-link]]` resolutions the new file would otherwise shadow.
+- When reorganizing, use `rename_memory` instead of `write` + `read` + delete — it moves the file AND rewrites `[[wiki-links]]` so every reference resolves to the same file it did before.
 
 ## Cross-thread correlation
 

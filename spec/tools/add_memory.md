@@ -4,7 +4,7 @@ Create a new memory file and preserve existing `[[wiki-link]]` resolutions.
 
 ## Description (shown to the model)
 
-Create a new memory note. Takes a wiki-link-style name (no `memory/` prefix, no `.md` extension — same form as `find_memory` and `rename_memory`). Before the file exists, any existing `[[...]]` reference whose resolution would be shadowed by the new file is rewritten to a path-qualified form that preserves its original target. Fails if the target already exists — use `write_file` with `mode: "replace"` or `edit_file` to update an existing file.
+Create a new memory note. Takes a wiki-link-style name (no `memory/` prefix, no `.md` extension — same form as `find_memory` and `rename_memory`). Before the file exists, any existing `[[...]]` reference whose resolution would be shadowed by the new file is rewritten to a path-qualified form that preserves its original target. Fails if the target already exists — use the canonical `write` (overwrite) or `edit` (find-and-replace) tool to update an existing file.
 
 ## Input
 
@@ -46,4 +46,4 @@ Internal `agent/src/memory.ts` module (graph + cache).
 ## Implementation notes
 
 - Reuse the wiki-link parser the graph builder uses — don't hand-roll regex that mishandles embeds (`![[...]]`) or aliases (`[[name|display]]`).
-- The agent may also call `write_file` with `mode: "create"` under `memory/`, but that bypasses the link-preservation step. Prefer `add_memory` for any memory-file creation that could shadow existing bare-name links.
+- The agent may also use the canonical `write` tool to create a file under `memory/`, but that bypasses the link-preservation step. Prefer `add_memory` for any memory-file creation that could shadow existing bare-name links.

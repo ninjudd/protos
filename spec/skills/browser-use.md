@@ -1,6 +1,6 @@
 ---
 name: browser-use
-description: Drive a real browser via browser-harness when web_fetch isn't enough — auth, clicks, forms, screenshots, signed-in pages.
+description: Drive a real browser via browser-harness when webFetch isn't enough — auth, clicks, forms, screenshots, signed-in pages.
 preferred_model: reasoning
 ---
 
@@ -8,10 +8,10 @@ preferred_model: reasoning
 
 Two ways to read the web. Pick the cheap one first.
 
-1. **`web_fetch` tool** — anonymous reads of public-ish pages. Articles, GitHub HTML, docs, blog posts. No setup. JS-rendered sites work via the `jina` or `playwright` backends. **Try this first.**
-2. **`browser-harness` CLI via `shell`** — a real, attached Chrome session with the owner's logins. Use only when `web_fetch` can't do the job: signed-in pages, multi-step forms, clicks, file uploads, screenshots, anything CDP-only.
+1. **`webFetch` tool** — anonymous reads of public-ish pages. Articles, GitHub HTML, docs, blog posts. No setup. **Try this first.** Behavior varies by backend (Claude/Codex use native hosted fetch with JS rendering; Vercel/OpenAI Agents use agent-sdk's bundled in-process impl; future plans swap that for Tavily Extract — see `plan/web-search-and-fetch.md`).
+2. **`browser-harness` CLI via `bash`** — a real, attached Chrome session with the owner's logins. Use only when `webFetch` can't do the job: signed-in pages, multi-step forms, clicks, file uploads, screenshots, anything CDP-only.
 
-If you're not sure which you need, try `web_fetch` first. If it returns junk, an empty body, a login wall, or a captcha, escalate.
+If you're not sure which you need, try `webFetch` first. If it returns junk, an empty body, a login wall, or a captcha, escalate.
 
 ## Privacy
 
@@ -44,7 +44,7 @@ Verify install with `browser-harness --doctor` (this won't connect to Chrome yet
 
 ## Chrome remote-debugging toggle
 
-The owner enables `browser-harness` access by ticking **"Allow remote debugging for this browser instance"** at `chrome://inspect/#remote-debugging`. The page shows "Server running at: 127.0.0.1:9222" once it's live. Unticking the same checkbox is the only off switch — `browser-harness` calls then fail at the connection step and you fall back to `web_fetch`. (Uninstalling the binary doesn't help; this skill would just walk the owner through reinstalling it.)
+The owner enables `browser-harness` access by ticking **"Allow remote debugging for this browser instance"** at `chrome://inspect/#remote-debugging`. The page shows "Server running at: 127.0.0.1:9222" once it's live. Unticking the same checkbox is the only off switch — `browser-harness` calls then fail at the connection step and you fall back to `webFetch`. (Uninstalling the binary doesn't help; this skill would just walk the owner through reinstalling it.)
 
 Whether they leave it on or toggle it per-task depends on the deployment:
 
@@ -79,7 +79,7 @@ For anything addressable in the DOM (buttons, links, "Show more" expanders), pre
 
 ### Heavy or multi-step work → delegate
 
-Page contents and screenshots blow up context fast. For research, scraping, or any multi-step browser task, use `delegate_task` with `tools: ["shell"]` and a skill list that includes `browser-use`. The raw output stays in the sub-agent's context; only the summary comes back.
+Page contents and screenshots blow up context fast. For research, scraping, or any multi-step browser task, use `delegate_task` with `tools: ["bash"]` and a skill list that includes `browser-use`. The raw output stays in the sub-agent's context; only the summary comes back.
 
 ## Extending helpers.py
 
@@ -89,7 +89,7 @@ If a needed helper is missing (the upstream design assumes this happens often �
 
 Then re-run your task. Because browser-harness was installed with `uv tool install -e`, the new helper is live immediately — no reinstall.
 
-Don't hand-edit `helpers.py` from your shell tool. Delegate to the coding agent so the change is reviewed, committed, and cleanly mergeable against upstream.
+Don't hand-edit `helpers.py` from your `bash` tool. Delegate to the coding agent so the change is reviewed, committed, and cleanly mergeable against upstream.
 
 ## Site-specific patterns
 

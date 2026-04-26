@@ -55,7 +55,7 @@ The runner (in `agent/src/agents/runner.ts`):
    - Today's date.
    - For each skill, the full body (frontmatter optional — body is what matters).
    - **Not included:** SOUL.md, memory manifest, recent journal, conversation history.
-4. **Call `generateText`** with the assembled system prompt, the `prompt` as the user message, the resolved tool subset, the chosen model, and a step limit (initially the same as the main agent's, e.g. `stepCountIs(25)`).
+4. **Call `agent.run({ message: prompt })`** on a sub-agent constructed with the assembled `instructions` (system prompt), the resolved tool subset, and the chosen model profile's backend. No continuation — sub-agents are stateless. Inherit the same per-backend turn cap as the main agent (~25).
 5. **Write the event-stream log.** Every event the sub-agent produces (user prompt, assistant steps, tool calls, tool results) appends to the sub-agent's log file using the same [event schema](../architecture.md#event-schema) as threads and cron logs. The log path is determined by the caller:
    - Called from a cron run: `runtime/logs/cron/{jobname}/{ISO-timestamp}/{call_id}.jsonl`
    - Called from a thread turn: `runtime/logs/sub-agents/{channelId}/{conversationId}/{turn_id}-{call_id}.jsonl`
@@ -65,7 +65,7 @@ The runner (in `agent/src/agents/runner.ts`):
 
 - **No nested sub-agents.** The runner removes `delegate_task` from the tool allowlist passed to the sub-agent (even if the caller asks for it). Single level of delegation, period. Revisit if needed.
 - **Sub-agent has no awareness of being one.** The framing line is the only signal. Otherwise it's a generic LLM call with the given prompt and tools.
-- **Skills are inlined, not just listed.** The point of inlining is that the sub-agent acts on the skill instructions immediately, without spending steps on `read_file`.
+- **Skills are inlined, not just listed.** The point of inlining is that the sub-agent acts on the skill instructions immediately, without spending steps on `read`.
 
 ## Examples
 
@@ -75,7 +75,7 @@ Web research with a digestion skill:
 delegate_task({
   prompt: "Find recent (last 30 days) news about Anthropic safety research. Return a 5-bullet summary with source URLs.",
   skills: ["web-research"],
-  tools: ["web_fetch"],
+  tools: ["webFetch"],
 })
 ```
 
@@ -95,17 +95,17 @@ Code review across many files:
 delegate_task({
   prompt: "Review the implementation of the cron scheduler and identify any race conditions or edge cases.",
   skills: ["code-review"],
-  tools: ["read_file", "shell"],
+  tools: ["read", "bash"],
 })
 ```
 
 ## Dependencies
 
-Internal — the AI SDK and its `generateText` function (already used by the main agent).
+Internal — agent-sdk's `Agent` and `agent.run()` (already used by the main agent).
 
 ## Implementation notes
 
-- The runner should reuse the agent's existing model client setup; just pass a different `system` and `messages`.
-- Step limit: same as main agent for now. Tune later based on observed sub-agent behavior.
-- Tool execution inside the sub-agent uses the same tool-loop semantics as the main agent.
+- The runner reuses the same `agentForProfile` resolver as the main agent so fallback applies consistently.
+- Turn cap: same as main agent for now. Tune later based on observed sub-agent behavior.
+- Tool execution inside the sub-agent uses agent-sdk's tool-loop semantics, identical to the main agent.
 - Cost is double-billed: each `delegate_task` invocation is a full LLM call (or many, if the sub-agent uses tools). Worth it when the alternative is loading 50KB of intermediate data into the main context for every subsequent turn.

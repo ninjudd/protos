@@ -22,11 +22,11 @@ What to skip:
 
 ## Which tool to use
 
-- **`remember(text)`** — quick journal jot. Sugar for appending to `memory/journal/{date}.md`. Use for transient observations or things you want to consolidate later.
-- **`add_memory(name, content)`** — create a new structured memory file. Takes wiki-link form (no `memory/` prefix, no `.md`). Preserves existing `[[wiki-link]]` resolutions that the new file would otherwise shadow. Prefer this over `write_file` for new memory.
+- **`add_journal_entry(text)`** — quick journal jot. Sugar for appending to `memory/journal/{date}.md`. Use for transient observations or things you want to consolidate later.
+- **`add_memory(name, content)`** — create a new structured memory file. Takes wiki-link form (no `memory/` prefix, no `.md`). Preserves existing `[[wiki-link]]` resolutions that the new file would otherwise shadow. Prefer this over the canonical `write` for new memory.
 - **`find_memory(name)`** — look up by wiki-link name. Returns a list of matches sorted shortest-path first; first entry is what bare `[[name]]` would resolve to.
 - **`rename_memory(oldName, newName)`** — move/rename a memory file. Rewrites every `[[wiki-link]]` so each reference still resolves to the same file.
-- **`edit_file` / `write_file({mode: "replace"})`** — update an existing memory file. Don't use `write_file({mode: "create"})` for new memory; it bypasses link preservation.
+- **`edit` / `write`** (canonical) — update an existing memory file. Don't use `write` to *create* new memory files; it bypasses link preservation. Use `add_memory` instead.
 
 ## Linking and hierarchy
 

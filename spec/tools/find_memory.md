@@ -20,7 +20,7 @@ Look up a memory note by wiki-link-style name. Returns a list of every file whos
 { matches: Array<{ path: string, backlinks: string[] }> }
 ```
 
-- `path` — workspace-relative path (e.g. `"memory/preferences/coffee.md"`), suitable for passing to `read_file`.
+- `path` — workspace-relative path (e.g. `"memory/preferences/coffee.md"`), suitable for passing to `read`.
 - `backlinks` — workspace-relative paths of other memory files that contain `[[...]]` references resolving to this file.
 
 `matches` is empty on no match — `matches.length === 0` means "not found." Never `null` or `undefined`.
@@ -40,4 +40,4 @@ Internal `agent/src/memory.ts` module (graph + cache).
 ## Implementation notes
 
 - The internal resolver may deal in file paths; the tool wrapper always returns the wrapped list shape. Do NOT pass `null` through.
-- This is the canonical way for the agent to look up memory; raw `read_file("memory/...")` works but skips name resolution and backlinks.
+- This is the canonical way for the agent to look up memory; raw `read("memory/...")` works but skips name resolution and backlinks.
