@@ -8,7 +8,7 @@ preferred_model: reasoning
 
 Two ways to read the web. Pick the cheap one first.
 
-1. **`webFetch` tool** — anonymous reads of public-ish pages. Articles, GitHub HTML, docs, blog posts. No setup. **Try this first.** Behavior varies by backend (Claude/Codex use native hosted fetch with JS rendering; Vercel/OpenAI Agents use agent-sdk's bundled in-process impl; future plans swap that for Tavily Extract — see `plan/web-search-and-fetch.md`).
+1. **`webFetch` tool** — anonymous reads of public-ish pages. Articles, GitHub HTML, docs, blog posts. No setup. **Try this first.** Behavior varies by backend (Claude/Codex use native hosted fetch with JS rendering; Vercel/`openai` use agent-sdk's bundled in-process impl; future plans swap that for Tavily Extract — see `plan/web-search-and-fetch.md`).
 2. **`browser-harness` CLI via `bash`** — a real, attached Chrome session with the owner's logins. Use only when `webFetch` can't do the job: signed-in pages, multi-step forms, clicks, file uploads, screenshots, anything CDP-only.
 
 If you're not sure which you need, try `webFetch` first. If it returns junk, an empty body, a login wall, or a captcha, escalate.

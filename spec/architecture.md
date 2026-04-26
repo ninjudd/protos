@@ -153,7 +153,7 @@ This applies to all invocations — direct user messages and cron-originated hea
 
 The agent is the brain. It uses [agent-sdk](https://github.com/ExProtos/agent-sdk) to receive a message + history, decide how to respond, optionally use tools, and return a response. agent-sdk wraps four runtimes (Claude Agent SDK, Codex AppServer, OpenAI Agents SDK, Vercel AI SDK) behind one API; each model profile picks one as its **backend** (see [Model selection](#model-selection) below).
 
-**Tools** are typed capabilities. agent-sdk ships a canonical catalog with backend-specific dispatch — native implementations on Claude/Codex (sandboxed `Bash`, tuned `Read`/`Write`/`Edit`/`apply_patch`, native `Task`/`TodoWrite`), hosted tools on OpenAI Agents (`web_search`, `code_interpreter`, etc.), and bundled in-process implementations on Vercel and OpenAI Agents fallbacks. Custom protos-specific tools live in `agent/src/tools/` and are passed alongside the canonical set.
+**Tools** are typed capabilities. agent-sdk ships a canonical catalog with backend-specific dispatch — native implementations on Claude/Codex (sandboxed `Bash`, tuned `Read`/`Write`/`Edit`/`apply_patch`, native `Task`/`TodoWrite`), hosted tools on the `openai` backend (`web_search`, `code_interpreter`, etc., via the OpenAI Agents SDK), and bundled in-process implementations on Vercel and `openai` fallbacks. Custom protos-specific tools live in `agent/src/tools/` and are passed alongside the canonical set.
 
 **Canonical tools** (provided by agent-sdk):
 
@@ -164,8 +164,8 @@ The agent is the brain. It uses [agent-sdk](https://github.com/ExProtos/agent-sd
 - `glob(pattern)` — file pattern matching
 - `grep(pattern, path?)` — content search
 - `webFetch(url)` — fetch a URL and return content as markdown
-- `webSearch(query)` — web search; native on Claude/Codex/OpenAI Agents (hosted `web_search`); silent no-op on Vercel until a `withImpls` provider is wired
-- `todo(todos)` — task list (native on Claude/Codex; in-memory state with system-prompt re-injection on Vercel/OpenAI Agents)
+- `webSearch(query)` — web search; native on Claude/Codex/`openai` (hosted `web_search`); silent no-op on Vercel until a `withImpls` provider is wired
+- `todo(todos)` — task list (native on Claude/Codex; in-memory state with system-prompt re-injection on Vercel/`openai`)
 - `task({prompt, subagent_type})` — spawn a focused SDK-level sub-agent (see [Sub-agents](#sub-agents))
 
 **Custom tools** (protos-specific, in `agent/src/tools/`):
@@ -225,7 +225,7 @@ reasoning:
   model: gpt-5
 
 hosted-tools:
-  backend: openai-agents
+  backend: openai
   model: gpt-5
 
 local:
@@ -249,10 +249,10 @@ subagent: fast              # string value = pointer to another profile
 
 - **`claude`** — Claude Agent SDK. ChatGPT-style subscription via `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token` once) or API key via `ANTHROPIC_API_KEY`. Native sandboxed `Bash`, tuned `Read`/`Write`/`Edit`, native `Task`/`TodoWrite`/`webSearch`/`webFetch`.
 - **`codex`** — Codex AppServer (`codex app-server`). ChatGPT subscription via `~/.codex/auth.json` (run `codex login` once) or `OPENAI_API_KEY`. Native `apply_patch` editing, native `plan` (todo) and `collabAgentToolCall` (task).
-- **`openai-agents`** — OpenAI Agents SDK (`@openai/agents`). API-key only (`OPENAI_API_KEY`). Adds OpenAI's hosted tools (`web_search`, `code_interpreter`, `image_generation`, `file_search`, `computer_use`) and built-in tracing.
+- **`openai`** — OpenAI Agents SDK (`@openai/agents`). API-key only (`OPENAI_API_KEY`). Adds OpenAI's hosted tools (`web_search`, `code_interpreter`, `image_generation`, `file_search`, `computer_use`) and built-in tracing. **Don't confuse `backend: openai` with `provider: openai`** — the former is a sibling of `claude`/`codex`/`vercel` and uses `@openai/agents`; the latter is a Vercel sub-option that uses `@ai-sdk/openai`. They reach the same models via different paths.
 - **`vercel`** — Vercel AI SDK Agent. Provider-portable: `anthropic`, `openai`, or `openai-compatible` (Ollama, LM Studio, llama.cpp server, vLLM). Per-profile `api_key:`. Bundled in-process tool implementations; `webSearch` is a silent no-op until a `withImpls` provider is wired.
 
-| Field | `claude` | `codex` | `openai-agents` | `vercel` |
+| Field | `claude` | `codex` | `openai` | `vercel` |
 |---|---|---|---|---|
 | `backend` | required | required | required | optional (default if `provider:` is set) |
 | `model` | required | required | required | required |
@@ -262,7 +262,7 @@ subagent: fast              # string value = pointer to another profile
 | `temperature` | passes through | passes through | passes through | passes through |
 | `fallback` | works | works | works | works |
 
-`codex` and `openai-agents` both target OpenAI models but are not interchangeable: `codex` is the subscription path, `openai-agents` is the API-key path with hosted tools and tracing. Codex API mode and OpenAI Agents share `OPENAI_API_KEY`.
+`codex` and `openai` both target OpenAI models but are not interchangeable: `codex` is the subscription path, `openai` is the API-key path with hosted tools and tracing. Codex API mode and the `openai` backend share `OPENAI_API_KEY`.
 
 Tool-use support varies across local models; if an `openai-compatible` profile struggles with tool calling, route the specific calls that need it (via channel/cron `model:` or `delegate_task` `model:`) to a hosted profile and keep local for simpler text tasks.
 
@@ -278,9 +278,9 @@ Tool-use support varies across local models; if an `openai-compatible` profile s
 
 **Hints vs. directives.** Channel `model:`, cron `model:`, explicit `delegate_task` `model:`, and profile `fallback:` are **directives** — an unknown profile errors (at load for static references, at call time for dynamic). Skill `preferred_model:` is a **hint** — if the named profile doesn't exist, the preference is silently skipped and resolution continues (next skill's preference, else `subagent`). This lets skills ship with reasonable preferences without forcing every user to define a matching profile.
 
-**Validation at load.** The loader validates every profile resolves (no unknown pointers, no cycles); every resolved profile has a valid backend + model after env substitution, with backend-required fields present (e.g. `provider:` and `base_url:` for `vercel` openai-compatible) and unknown-for-this-backend fields rejected; required environment variables are present per backend (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` for `claude`; `OPENAI_API_KEY` or `~/.codex/auth.json` for `codex`; `OPENAI_API_KEY` for `openai-agents`); and every directive reference (channel `model:` in `channels.yaml`, cron `model:` in merged frontmatter, profile `fallback:`) points at an existing profile. Skill `preferred_model:` is a hint and is NOT validated at load. Today "load" = startup; validation failures exit the process non-zero with a message naming the file and the offending reference.
+**Validation at load.** The loader validates every profile resolves (no unknown pointers, no cycles); every resolved profile has a valid backend + model after env substitution, with backend-required fields present (e.g. `provider:` and `base_url:` for `vercel` openai-compatible) and unknown-for-this-backend fields rejected; required environment variables are present per backend (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` for `claude`; `OPENAI_API_KEY` or `~/.codex/auth.json` for `codex`; `OPENAI_API_KEY` for `openai`); and every directive reference (channel `model:` in `channels.yaml`, cron `model:` in merged frontmatter, profile `fallback:`) points at an existing profile. Skill `preferred_model:` is a hint and is NOT validated at load. Today "load" = startup; validation failures exit the process non-zero with a message naming the file and the offending reference.
 
-**Per-process auth caveat.** Two `claude` profiles in one daemon share `CLAUDE_CODE_OAUTH_TOKEN` (same for two `codex` profiles, or `OPENAI_API_KEY` between codex API mode and openai-agents). Per-profile API keys work only on the `vercel` backend. Fine for protos's single-user model; document if multi-account support becomes interesting.
+**Per-process auth caveat.** Two `claude` profiles in one daemon share `CLAUDE_CODE_OAUTH_TOKEN` (same for two `codex` profiles, or `OPENAI_API_KEY` between codex API mode and the `openai` backend). Per-profile API keys work only on the `vercel` backend. Fine for protos's single-user model; document if multi-account support becomes interesting.
 
 **Temperature** is a per-profile field. Other knobs (max tokens, thinking budget, context-window override, …) can be added later — keep the schema minimal until there's demand.
 
@@ -288,7 +288,7 @@ Tool-use support varies across local models; if an `openai-compatible` profile s
 
 The agent can spawn focused sub-agents two ways:
 
-- **`task`** (canonical) — agent-sdk's tuned sub-agent primitive: `Task` on Claude, `collabAgentToolCall` on Codex, `Agent.asTool` on OpenAI Agents, special-cased child runner on Vercel. Use when the model wants a focused worker without protos's skill-list/tool-allowlist conventions.
+- **`task`** (canonical) — agent-sdk's tuned sub-agent primitive: `Task` on Claude, `collabAgentToolCall` on Codex, `Agent.asTool` on the `openai` backend, special-cased child runner on Vercel. Use when the model wants a focused worker without protos's skill-list/tool-allowlist conventions.
 - **`delegate_task`** (custom) — protos's skill-aware sub-agent. Caller provides explicit `skills: string[]`, `tools: string[]`, and optional `model:`. The skill bodies are inlined; the tool allowlist is enforced; the sub-agent log lands at the protos path layout (below). Skill `preferred_model:` resolution applies here.
 
 A `delegate_task` sub-agent is a separate `agent.run()` invocation with:
@@ -445,7 +445,7 @@ Each backend owns conversation-context reconstruction via its own continuation t
 **The five cases** the dispatcher handles:
 
 1. **Cold start** — directory empty. `agent.run({ message })` no continuation. Save the resulting token to `{profile}.continuation`. Append events to `{profile}.jsonl`.
-2. **Same-profile resume** — `{profile}.continuation` exists. Pass token: `agent.run({ message, continuation })`. Backend resumes from native storage (Claude/Codex SDK files; agent-sdk's session JSONL on Vercel/OpenAI Agents).
+2. **Same-profile resume** — `{profile}.continuation` exists. Pass token: `agent.run({ message, continuation })`. Backend resumes from native storage (Claude/Codex SDK files; agent-sdk's session JSONL on Vercel/`openai`).
 3. **Profile switch forward** (fresh into a not-yet-seen profile) — compute the recap from other profiles' tails, prepend to the user message, call `agent.run({ message: <recap + actual> })`, save new continuation.
 4. **Profile switch back** (`{profile}.continuation` exists, but other profiles have run since) — compute the gap (events with `timestamp > T_{profile}_last` from other profiles' JSONLs), prepend recap to user message, call `agent.run({ message, continuation })`. Resume the prior session AND inject the gap context.
 5. **Continuation invalid** — backend signals `isContinuationInvalid(err)`; clear the sidecar and retry as case 3.
@@ -485,7 +485,7 @@ The actual user message keeps its existing `[sent …]` prefix as the boundary c
 |---|---|---|
 | `claude` | `~/.claude/projects/.../{session-id}.jsonl` (Claude SDK's storage) | Same |
 | `codex` | `~/.codex/sessions/...` + sqlite | Same |
-| `openai-agents` | `runtime/sessions/openai-agents/{continuation}.jsonl` (`AgentInputItem` lines) | Appends `AgentInputItem` rows |
+| `openai` | `runtime/sessions/openai/{continuation}.jsonl` (`AgentInputItem` lines) | Appends `AgentInputItem` rows |
 | `vercel` | `runtime/sessions/vercel/{continuation}.jsonl` (UIMessage) | Appends UIMessage rows |
 
 The SDK's session storage is opaque to protos — never read or written directly. Our threads JSONL is the canonical durable record.
@@ -495,7 +495,7 @@ The SDK's session storage is opaque to protos — never read or written directly
 - **Append-only writes.** The router serializes per-conversation, so there's never a concurrent writer on the same `(channelId, conversationId)` directory.
 - Each event is appended to its profile's JSONL as it streams from `agent.events`. One agent invocation typically appends multiple events to a single `{profile}.jsonl`.
 - **Reads** load the whole directory and parse line-by-line, merging across profiles by timestamp. For a personal assistant this is fine even across years of conversation.
-- **Backup** is copying both `runtime/threads/` and `runtime/blobs/` together. The threads JSONL references blobs by path; without the bytes, replay produces missing-blob warnings rather than the original images. `runtime/sessions/` is also worth backing up if you want the Vercel/OpenAI Agents backends to truly resume sessions across machines — without it, the next turn falls into case 5 (continuation invalid) and runs as a fresh session with a recap.
+- **Backup** is copying both `runtime/threads/` and `runtime/blobs/` together. The threads JSONL references blobs by path; without the bytes, replay produces missing-blob warnings rather than the original images. `runtime/sessions/` is also worth backing up if you want the Vercel/`openai` backends to truly resume sessions across machines — without it, the next turn falls into case 5 (continuation invalid) and runs as a fresh session with a recap.
 
 ### Attachments (`runtime/blobs/`)
 
@@ -527,7 +527,7 @@ All plain files spread across the domains:
 - **`memory/journal/`** — daily scratch pad files (e.g., `memory/journal/2026-03-09.md`). The agent jots notes throughout the day; the `dream` cron promotes important items into the rest of `memory/`.
 - **`memory/new/`** — inbox folder. The agent writes new notes here when there's no obvious folder yet (use `add_memory("new/{name}", content)`). The `dream` cron sorts the inbox into appropriate folders. Prefer confident placement (`add_memory` directly into the right folder) when you know where it belongs; use the inbox only when genuinely unsure.
 - **`memory/archive/`** — cold storage for content `dream` decided isn't currently useful but might be worth keeping. Exempt from the orphan check — things here don't need to be reachable from a root file. Use `rename_memory("{name}", "archive/{name}")` to move something into the archive.
-- **`runtime/`** — `threads/` (per-conversation directories of `{profile}.jsonl` + `{profile}.continuation` sidecars + per-profile consolidation cursors), `sessions/{vercel,openai-agents}/{continuation}.jsonl` (agent-sdk session storage for backends without their own), `logs/cron/{jobname}/{ISO}.jsonl` (one per cron run), `logs/cron/{jobname}/{ISO}/{call_id}.jsonl` (sub-agent logs), `logs/sub-agents/` (thread-originated sub-agent logs — see [Sub-agents](#sub-agents)), `*.pid`, `memory-graph.json` (backlink cache). See **Memory consolidation** below for cursor details.
+- **`runtime/`** — `threads/` (per-conversation directories of `{profile}.jsonl` + `{profile}.continuation` sidecars + per-profile consolidation cursors), `sessions/{vercel,openai}/{continuation}.jsonl` (agent-sdk session storage for backends without their own), `logs/cron/{jobname}/{ISO}.jsonl` (one per cron run), `logs/cron/{jobname}/{ISO}/{call_id}.jsonl` (sub-agent logs), `logs/sub-agents/` (thread-originated sub-agent logs — see [Sub-agents](#sub-agents)), `*.pid`, `memory-graph.json` (backlink cache). See **Memory consolidation** below for cursor details.
 
 ## Memory format
 
@@ -753,10 +753,10 @@ runtime/
         default.jsonl
         default.continuation
         default.cursor
-  sessions/           # agent-sdk session storage (Vercel + OpenAI Agents own these; Claude/Codex don't)
+  sessions/           # agent-sdk session storage (Vercel + openai own these; Claude/Codex don't)
     vercel/
       {continuation}.jsonl
-    openai-agents/
+    openai/
       {continuation}.jsonl
   blobs/              # content-addressed media (sha256-named) referenced by thread events
   clients/            # per-client cursor files
@@ -863,7 +863,7 @@ cd memory && git init  # commits happen as the agent learns
 ## Security considerations
 
 - The agent runs with shell access and the same permissions as the host user. Consider running it on a dedicated machine or in a container.
-- The canonical **`bash` tool** runs commands using bash from the workspace root. On Claude/Codex it runs sandboxed natively; on Vercel/OpenAI Agents agent-sdk's bundled impl runs in-process. The agent should confirm destructive commands with the user before running them.
+- The canonical **`bash` tool** runs commands using bash from the workspace root. On Claude/Codex it runs sandboxed natively; on Vercel/`openai` agent-sdk's bundled impl runs in-process. The agent should confirm destructive commands with the user before running them.
 - **Never log credentials.** When catching errors, log only the error message — not full objects, which may contain API tokens or bot secrets.
 - Secrets live in `config/models.yaml` and `config/channels.yaml` (inline, or referenced via `$NAME` substitution from `config/.env`).
 - The thread files in `runtime/threads/` contain all your messages — protect that directory accordingly.

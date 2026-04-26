@@ -43,13 +43,13 @@ default:
   model: claude-sonnet-4-6
 ```
 
-Put a current Claude Sonnet model ID in the template. Don't try to pin a specific version across builds — model names change frequently. `backend:` is required for `claude` / `codex` / `openai-agents`; the `vercel` backend's profile must additionally set `provider:` (`anthropic` / `openai` / `openai-compatible`) and the corresponding fields (`api_key:` for hosted; `base_url:` for openai-compatible).
+Put a current Claude Sonnet model ID in the template. Don't try to pin a specific version across builds — model names change frequently. `backend:` is required for `claude` / `codex` / `openai`; the `vercel` backend's profile must additionally set `provider:` (`anthropic` / `openai` / `openai-compatible`) and the corresponding fields (`api_key:` for hosted; `base_url:` for openai-compatible).
 
 **Auth setup before first run.**
 
 - **`claude` backend** — run `claude setup-token` once to populate `CLAUDE_CODE_OAUTH_TOKEN` (subscription billing). Or set `ANTHROPIC_API_KEY` for metered API.
 - **`codex` backend** — run `codex login` once to populate `~/.codex/auth.json` (ChatGPT subscription). Or set `OPENAI_API_KEY` for metered API.
-- **`openai-agents` backend** — set `OPENAI_API_KEY`. No OAuth path; subscription auth requires `codex` instead.
+- **`openai` backend** — set `OPENAI_API_KEY`. No OAuth path; subscription auth requires `codex` instead.
 - **`vercel` backend** — per-profile `api_key:` in YAML (typically referenced via `$NAME` from `.env`).
 
 Document this in the user-facing setup notes the build emits.
@@ -77,7 +77,7 @@ Per-backend env vars (only the ones for backends actually used in `models.yaml` 
 
 - `CLAUDE_CODE_OAUTH_TOKEN` — populated by `claude setup-token`. Used by the `claude` backend (subscription).
 - `ANTHROPIC_API_KEY` — alternative for the `claude` backend (metered API), and required by `vercel` profiles using `provider: anthropic`.
-- `OPENAI_API_KEY` — used by the `codex` backend (metered API; OAuth lives in `~/.codex/auth.json`), the `openai-agents` backend (only auth path), and `vercel` profiles using `provider: openai`.
+- `OPENAI_API_KEY` — used by the `codex` backend (metered API; OAuth lives in `~/.codex/auth.json`), the `openai` backend (only auth path), and `vercel` profiles using `provider: openai`.
 
 Self-edit toggling and `spec/` write protection are now OS-level — see `architecture.md` → Self-modification. No `PROTOS_SELF_EDIT` env var.
 
@@ -100,7 +100,7 @@ If the user is updating from a pre-YAML deployment (where `AI_MODEL` / `ANTHROPI
 - Source code goes in `agent/src/` per the file structure in `architecture.md`.
 - Use `process.cwd()` for the workspace root path, not `import.meta.dirname` — tsx runs in CJS mode where `import.meta.dirname` is undefined. The wrapper script ensures the process runs with the workspace root as cwd.
 - Create `config/` if it doesn't exist (the agent should do this on first run, but the build can pre-create it). Write three templates:
-  - `config/models.yaml` — a single `default:` profile with `backend: claude` and a current Claude Sonnet model ID. The user runs `claude setup-token` once to populate `CLAUDE_CODE_OAUTH_TOKEN` (subscription billing). The user can edit to pick a different backend (`codex`, `openai-agents`, `vercel`), add providers, or add more profiles. Drop a comment in the template pointing at `architecture.md` → Model selection → Backends.
+  - `config/models.yaml` — a single `default:` profile with `backend: claude` and a current Claude Sonnet model ID. The user runs `claude setup-token` once to populate `CLAUDE_CODE_OAUTH_TOKEN` (subscription billing). The user can edit to pick a different backend (`codex`, `openai`, `vercel`), add providers, or add more profiles. Drop a comment in the template pointing at `architecture.md` → Model selection → Backends.
   - `config/channels.yaml` — `primary:` pointing at the user's chosen channel, one block for that channel with credentials referenced via `$NAME`, and a `terminal: { enabled: true }` block.
   - `config/.env` — template containing the `$NAME` variables the YAML references (e.g. `TELEGRAM_BOT_TOKEN=`) plus stubs for the per-backend auth env vars from the Configuration section (`CLAUDE_CODE_OAUTH_TOKEN=`, `ANTHROPIC_API_KEY=`, `OPENAI_API_KEY=`), blank for the user to fill in.
 
@@ -162,7 +162,7 @@ Use agent-sdk's `Agent` + `agent.run()` for automatic tool execution. Cap each `
 - Build a **profile-to-Agent resolver** from `config/models.yaml` at startup per `architecture.md` → Model selection. Expose a helper like `agentForProfile(profileName)` → `Agent` that the router/scheduler/sub-agent runner call with the resolved profile name. Construct each profile's `Agent` once on first use and cache it (one `Agent` per profile); reuse across dispatches.
 - Wrap every `agent.run()` call through a **fallback-aware adapter**: on credit-exhausted, rate-limit, or provider 5xx, or connection errors, look up the resolved profile's `fallback:` (if any), build the fallback profile's `Agent`, and retry once with the fallback. Cross-backend fallback works — the adapter wraps `agent.run` regardless of backend. Auth and 4xx-other errors pass through. Continuation tokens are profile-scoped (per `architecture.md` → Session continuity), so a fallback retry uses the fallback profile's continuation, not the failed profile's.
 - The dispatcher reads continuation + computes any gap-recap per the five cases in `architecture.md` → Session continuity, then calls `agent.run({ message, continuation?, attachments? })`. Tee `query.events` into the appropriate `{profile}.jsonl`; persist the first `session_start.continuation` to the sidecar.
-- **No per-message history cap.** agent-sdk's per-backend auto-compaction (Claude/Codex native; Vercel and OpenAI Agents wrap their session in a compaction-aware decorator) keeps context within the model's window. Set per-profile `contextWindow:` only when the model isn't in agent-sdk's `MODEL_CONTEXT_WINDOWS` table — otherwise compaction silently disables for that profile.
+- **No per-message history cap.** agent-sdk's per-backend auto-compaction (Claude/Codex native; Vercel and `openai` wrap their session in a compaction-aware decorator) keeps context within the model's window. Set per-profile `contextWindow:` only when the model isn't in agent-sdk's `MODEL_CONTEXT_WINDOWS` table — otherwise compaction silently disables for that profile.
 - **No per-image token guard.** PR #51's `~1500 tokens per image` accounting now lives upstream in agent-sdk's compaction math. Just pass `QueryInput.attachments` and let the backend handle it.
 
 #### System prompt assembly
@@ -310,7 +310,7 @@ The entry point (`agent/src/index.ts`):
 5. Starts the scheduler
 6. Logs that it's running
 
-On any config-load failure (missing file, invalid YAML, unresolved pointer, missing `$NAME` env var, missing directive reference, **missing per-backend auth env var** for any used backend — `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` for `claude`; `OPENAI_API_KEY` or `~/.codex/auth.json` for `codex`; `OPENAI_API_KEY` for `openai-agents`), the process exits non-zero with a clear error message to stdout/stderr. The bash wrapper can't reasonably replicate this validation (YAML parsing, pointer resolution, env substitution), so it relies on a post-start health check (step 9) to surface early-exit failures by tailing the log.
+On any config-load failure (missing file, invalid YAML, unresolved pointer, missing `$NAME` env var, missing directive reference, **missing per-backend auth env var** for any used backend — `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` for `claude`; `OPENAI_API_KEY` or `~/.codex/auth.json` for `codex`; `OPENAI_API_KEY` for `openai`), the process exits non-zero with a clear error message to stdout/stderr. The bash wrapper can't reasonably replicate this validation (YAML parsing, pointer resolution, env substitution), so it relies on a post-start health check (step 9) to surface early-exit failures by tailing the log.
 
 That's it. No HTTP server needed unless a channel requires a webhook.
 

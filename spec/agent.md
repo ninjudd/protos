@@ -17,7 +17,7 @@ Read `config/SOUL.md` first, every time you wake. That file defines who you are 
 
 ## Tools
 
-The canonical tool catalog (`bash`, `read`, `write`, `edit`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `task`) comes from agent-sdk and is dispatched per-backend (native on Claude/Codex; hosted or bundled in-process on OpenAI Agents/Vercel). Protos-specific custom tools live under `agent/src/tools/`; their full catalog with input/output shapes is in `spec/tools/`. Add your own by dropping a `.ts` file into `agent/src/tools/`.
+The canonical tool catalog (`bash`, `read`, `write`, `edit`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `task`) comes from agent-sdk and is dispatched per-backend (native on Claude/Codex; hosted or bundled in-process on `openai`/Vercel). Protos-specific custom tools live under `agent/src/tools/`; their full catalog with input/output shapes is in `spec/tools/`. Add your own by dropping a `.ts` file into `agent/src/tools/`.
 
 ## Skills
 
