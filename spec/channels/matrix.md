@@ -27,6 +27,16 @@ matrix:
 2. Generate an access token
 3. Install `matrix-js-sdk`
 
+## Non-text content
+
+Matrix events use `m.room.message` with a `msgtype`: `m.text`, `m.image`, `m.audio`, `m.video`, `m.file`, `m.sticker`.
+
+- **Image events (`m.image`)** — `content.url` is an `mxc://` URI; convert to the homeserver's media-download URL (`${homeserver}/_matrix/media/v3/download/${server}/${mediaId}`), fetch with `Authorization: Bearer ${access_token}`, hash (sha256), write to `runtime/blobs/{sha256}.{ext}` (extension from `content.info.mimetype`), and attach as an `image` on the dispatched message. The message `text` is `content.body` (Matrix uses `body` as the human-readable label/caption).
+- **`m.audio`, `m.video`, `m.file`, `m.sticker`** — normalize to a placeholder string (e.g. `[voice message]`, `[document: report.pdf]`, `[sticker: 👋]`). Transcription and document parsing are out of scope for v1.
+- **Encrypted rooms** — image events in encrypted rooms wrap the URL in an encrypted payload; decrypt before fetching. Out of scope for v1; revisit when E2EE support lands.
+
+See `architecture.md` → Storage → Attachments for the blob layout and event schema.
+
 ## Notes
 
 - matrix-js-sdk handles sync via long polling — no HTTP server needed

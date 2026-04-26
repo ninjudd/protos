@@ -28,6 +28,15 @@ slack:
 5. Install the app to your workspace
 6. Install `@slack/bolt`
 
+## Non-text content
+
+Slack messages can carry uploaded files (`event.files[]`).
+
+- **Image files** — for each file whose `mimetype` starts with `image/`, fetch the bytes from `file.url_private` with `Authorization: Bearer ${bot_token}` (Slack file URLs require auth even for the bot's own workspace), hash (sha256), write to `runtime/blobs/{sha256}.{ext}`, and attach as an `image` on the dispatched message. The message `text` is `event.text` if present; if blank, fall back to `file.title` or `file.initial_comment` (Slack often puts captions there for file-only posts).
+- **Non-image files** (pdf, docx, audio, …) — normalize to a placeholder string (e.g. `[document: report.pdf]`, `[voice message]`). Transcription and document parsing are out of scope for v1.
+
+See `architecture.md` → Storage → Attachments for the blob layout and event schema.
+
 ## Markdown conversion
 
 The assistant writes standard markdown; Slack uses "mrkdwn", a similar but incompatible format. Convert messages before posting with a library like `slackify-markdown`. Key differences:
