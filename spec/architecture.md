@@ -279,6 +279,7 @@ subagent: fast              # string value = pointer to another profile
 | `ask_for_approval` | n/a | optional — `never` / `untrusted` / `on-request` / `granular` (Codex enum) | n/a | n/a |
 | `sandbox_mode` | n/a | optional — `read-only` / `workspace-write` / `danger-full-access` (Codex enum) | n/a | n/a |
 | `temperature` | passes through | passes through | passes through | passes through |
+| `context_window` | n/a | n/a | n/a | optional override for agent-sdk's auto-compaction threshold (only needed when the model isn't in agent-sdk's `MODEL_CONTEXT_WINDOWS` table; otherwise compaction silently disables for that profile) |
 | `fallback` | works | works | works | works |
 
 The permission/sandbox fields use each backend's native enum verbatim — no harmonization across backends. `claude` uses Claude Agent SDK's `permissionMode`; `codex` uses Codex's `AskForApproval` and `SandboxMode`. `openai` and `vercel` have no permission layer in their tool dispatch — bundled in-process tools just execute.
