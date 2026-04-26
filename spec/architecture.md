@@ -281,7 +281,7 @@ subagent: fast              # string value = pointer to another profile
 | `temperature` | passes through | passes through | passes through | passes through |
 | `fallback` | works | works | works | works |
 
-The permission/sandbox fields use each backend's native enum verbatim — no harmonization across backends. `claude` uses Claude Agent SDK's `permissionMode`; `codex` uses Codex's `AskForApproval` and `SandboxMode`. `openai` and `vercel` have no permission layer in their tool dispatch — bundled in-process tools just execute. (Codex's typed `ask_for_approval` and `sandbox_mode` require agent-sdk's codex-policy-options support; until that lands, the agent passes them via Codex CLI's `-c approval_policy=…` / `-c sandbox_mode=…` overrides.)
+The permission/sandbox fields use each backend's native enum verbatim — no harmonization across backends. `claude` uses Claude Agent SDK's `permissionMode`; `codex` uses Codex's `AskForApproval` and `SandboxMode`. `openai` and `vercel` have no permission layer in their tool dispatch — bundled in-process tools just execute.
 
 **Unattended defaults.** Protos runs as a daemon with no human in the loop to answer permission prompts, so `agent.ts` constructs each Backend with these defaults when the YAML doesn't override:
 
