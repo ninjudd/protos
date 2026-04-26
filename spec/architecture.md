@@ -227,6 +227,7 @@ reasoning:
 hosted-tools:
   backend: openai
   model: gpt-5
+  api_key: $OPENAI_API_KEY
 
 local:
   backend: vercel
@@ -240,6 +241,17 @@ backup-via-api:
   api_key: $ANTHROPIC_API_KEY
   model: claude-sonnet-4-6
 
+# Multi-account example: same backend, different credentials
+work:
+  backend: claude
+  model: claude-sonnet-4-6
+  oauth_token: $CLAUDE_WORK_TOKEN
+
+work-codex:
+  backend: codex
+  model: gpt-5
+  codex_home: runtime/codex-auth/work
+
 subagent: fast              # string value = pointer to another profile
 ```
 
@@ -247,9 +259,9 @@ subagent: fast              # string value = pointer to another profile
 
 **Backends.** Each profile names one of four backends. agent-sdk handles dispatch; protos cares about which one is named because that determines auth and tool availability.
 
-- **`claude`** — Claude Agent SDK. ChatGPT-style subscription via `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token` once) or API key via `ANTHROPIC_API_KEY`. Native sandboxed `Bash`, tuned `Read`/`Write`/`Edit`, native `Task`/`TodoWrite`/`webSearch`/`webFetch`.
-- **`codex`** — Codex AppServer (`codex app-server`). ChatGPT subscription via `~/.codex/auth.json` (run `codex login` once) or `OPENAI_API_KEY`. Native `apply_patch` editing, native `plan` (todo) and `collabAgentToolCall` (task).
-- **`openai`** — OpenAI Agents SDK (`@openai/agents`). API-key only (`OPENAI_API_KEY`). Adds OpenAI's hosted tools (`web_search`, `code_interpreter`, `image_generation`, `file_search`, `computer_use`) and built-in tracing. **Don't confuse `backend: openai` with `provider: openai`** — the former is a sibling of `claude`/`codex`/`vercel` and uses `@openai/agents`; the latter is a Vercel sub-option that uses `@ai-sdk/openai`. They reach the same models via different paths.
+- **`claude`** — Claude Agent SDK. Pro/Max subscription via `oauth_token:` (or ambient `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`); API key via `api_key:` (or ambient `ANTHROPIC_API_KEY`). The two are mutually exclusive per profile. Native sandboxed `Bash`, tuned `Read`/`Write`/`Edit`, native `Task`/`TodoWrite`/`webSearch`/`webFetch`.
+- **`codex`** — Codex AppServer (`codex app-server`). Auth lives in `auth.json` under a `CODEX_HOME` directory; pass `codex_home:` to point at a specific dir, or omit and use ambient `~/.codex/` (populated by `codex login`). The caller is responsible for populating `auth.json` (run `CODEX_HOME=<dir> codex login` for OAuth or `codex login --with-api-key` for API key). Native `apply_patch` editing, native `plan` (todo) and `collabAgentToolCall` (task).
+- **`openai`** — OpenAI Agents SDK (`@openai/agents`). API-key only — `api_key:` typed field, falls back to ambient `OPENAI_API_KEY`. Optional `base_url:`, `organization:`, `project:` for non-default OpenAI endpoints. Adds OpenAI's hosted tools (`web_search`, `code_interpreter`, `image_generation`, `file_search`, `computer_use`) and built-in tracing. **Don't confuse `backend: openai` with `provider: openai`** — the former is a sibling of `claude`/`codex`/`vercel` and uses `@openai/agents`; the latter is a Vercel sub-option that uses `@ai-sdk/openai`. They reach the same models via different paths.
 - **`vercel`** — Vercel AI SDK Agent. Provider-portable: `anthropic`, `openai`, or `openai-compatible` (Ollama, LM Studio, llama.cpp server, vLLM). Per-profile `api_key:`. Bundled in-process tool implementations; `webSearch` is a silent no-op until a `withImpls` provider is wired.
 
 | Field | `claude` | `codex` | `openai` | `vercel` |
@@ -257,16 +269,24 @@ subagent: fast              # string value = pointer to another profile
 | `backend` | required | required | required | optional (default if `provider:` is set) |
 | `model` | required | required | required | required |
 | `provider` | n/a | n/a | n/a | required (`anthropic`/`openai`/`openai-compatible`) |
-| `api_key` | n/a (env) | n/a (env or auth.json) | n/a (env) | required for hosted; optional for `openai-compatible` |
-| `base_url` | n/a | n/a | n/a | required for `openai-compatible` |
+| `oauth_token` | optional (or ambient env) | n/a | n/a | n/a |
+| `api_key` | optional (or ambient env) | n/a (in `auth.json`) | optional (or ambient env) | required for hosted; optional for `openai-compatible` |
+| `codex_home` | n/a | optional path (default ambient `~/.codex/`) | n/a | n/a |
+| `base_url` | n/a | n/a | optional | required for `openai-compatible` |
+| `organization` | n/a | n/a | optional | n/a |
+| `project` | n/a | n/a | optional | n/a |
 | `temperature` | passes through | passes through | passes through | passes through |
 | `fallback` | works | works | works | works |
 
-`codex` and `openai` both target OpenAI models but are not interchangeable: `codex` is the subscription path, `openai` is the API-key path with hosted tools and tracing. Codex API mode and the `openai` backend share `OPENAI_API_KEY`.
+For `claude`, setting both `oauth_token:` and `api_key:` on the same profile errors at load (mutually exclusive — agent-sdk's `ClaudeBackend` constructor throws).
+
+`codex` and `openai` both target OpenAI models but are not interchangeable: `codex` is the subscription path (auth in `~/.codex/auth.json` via `codex login`), `openai` is the API-key path with hosted tools and tracing.
 
 Tool-use support varies across local models; if an `openai-compatible` profile struggles with tool calling, route the specific calls that need it (via channel/cron `model:` or `delegate_task` `model:`) to a hosted profile and keep local for simpler text tasks.
 
 **Env-var substitution.** Any string field accepts `$NAME` as a whole-string value; the loader replaces it with `process.env.NAME`. Missing env vars error at load, naming the file path and variable. This lets users who want to commit `models.yaml` keep credentials in `.env`; users who don't mind can inline values.
+
+**Multi-account.** Each profile's auth is independent — agent-sdk constructs a fresh Backend instance per profile and passes the typed auth fields directly. Two `claude` profiles with different `oauth_token:` values are isolated; same for two `openai` profiles with different `api_key:` values. For `codex` multi-account, give each profile its own `codex_home:` directory and bootstrap each one once with `CODEX_HOME=<dir> codex login`.
 
 **Fallback.** A profile's `fallback:` names another profile. When a call against a profile errors with a credit-exhausted, rate-limit, provider 5xx, or connection error (ECONNREFUSED, timeout), the runtime retries the same call against the fallback — even if the fallback is a different backend. Connection errors are included so a "local-first, cloud-as-backup" setup — a `vercel` openai-compatible default with a `claude` profile as its `fallback:` — works when the local server is down. **Auth errors do NOT fall back** — they're config bugs and silent fallback hides them. One hop only; cycles detected at load.
 
@@ -278,9 +298,7 @@ Tool-use support varies across local models; if an `openai-compatible` profile s
 
 **Hints vs. directives.** Channel `model:`, cron `model:`, explicit `delegate_task` `model:`, and profile `fallback:` are **directives** — an unknown profile errors (at load for static references, at call time for dynamic). Skill `preferred_model:` is a **hint** — if the named profile doesn't exist, the preference is silently skipped and resolution continues (next skill's preference, else `subagent`). This lets skills ship with reasonable preferences without forcing every user to define a matching profile.
 
-**Validation at load.** The loader validates every profile resolves (no unknown pointers, no cycles); every resolved profile has a valid backend + model after env substitution, with backend-required fields present (e.g. `provider:` and `base_url:` for `vercel` openai-compatible) and unknown-for-this-backend fields rejected; required environment variables are present per backend (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` for `claude`; `OPENAI_API_KEY` or `~/.codex/auth.json` for `codex`; `OPENAI_API_KEY` for `openai`); and every directive reference (channel `model:` in `channels.yaml`, cron `model:` in merged frontmatter, profile `fallback:`) points at an existing profile. Skill `preferred_model:` is a hint and is NOT validated at load. Today "load" = startup; validation failures exit the process non-zero with a message naming the file and the offending reference.
-
-**Per-process auth caveat.** Two `claude` profiles in one daemon share `CLAUDE_CODE_OAUTH_TOKEN` (same for two `codex` profiles, or `OPENAI_API_KEY` between codex API mode and the `openai` backend). Per-profile API keys work only on the `vercel` backend. Fine for protos's single-user model; document if multi-account support becomes interesting.
+**Validation at load.** The loader validates every profile resolves (no unknown pointers, no cycles); every resolved profile has a valid backend + model after env substitution, with backend-required fields present (e.g. `provider:` and `base_url:` for `vercel` openai-compatible) and unknown-for-this-backend fields rejected; mutually exclusive fields don't both appear (Claude `oauth_token:` + `api_key:`); for each profile that doesn't set its backend's typed auth field, the corresponding ambient env var is present so the SDK has a fallback (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` for `claude`; `~/.codex/auth.json` exists for `codex` with no `codex_home:`; `OPENAI_API_KEY` for `openai`); and every directive reference (channel `model:` in `channels.yaml`, cron `model:` in merged frontmatter, profile `fallback:`) points at an existing profile. Skill `preferred_model:` is a hint and is NOT validated at load. Today "load" = startup; validation failures exit the process non-zero with a message naming the file and the offending reference.
 
 **Temperature** is a per-profile field. Other knobs (max tokens, thinking budget, context-window override, …) can be added later — keep the schema minimal until there's demand.
 

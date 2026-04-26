@@ -45,11 +45,16 @@ default:
 
 Put a current Claude Sonnet model ID in the template. Don't try to pin a specific version across builds — model names change frequently. `backend:` is required for `claude` / `codex` / `openai`; the `vercel` backend's profile must additionally set `provider:` (`anthropic` / `openai` / `openai-compatible`) and the corresponding fields (`api_key:` for hosted; `base_url:` for openai-compatible).
 
-**Auth setup before first run.**
+**Auth setup before first run.** Each backend accepts typed auth fields directly on the profile (preferred — discoverable, IDE-completable, supports multi-account) and falls back to ambient env vars (simpler — fine for the common single-account case).
 
-- **`claude` backend** — run `claude setup-token` once to populate `CLAUDE_CODE_OAUTH_TOKEN` (subscription billing). Or set `ANTHROPIC_API_KEY` for metered API.
-- **`codex` backend** — run `codex login` once to populate `~/.codex/auth.json` (ChatGPT subscription). Or set `OPENAI_API_KEY` for metered API.
-- **`openai` backend** — set `OPENAI_API_KEY`. No OAuth path; subscription auth requires `codex` instead.
+- **`claude` backend** —
+  - *Subscription:* run `claude setup-token` once. Either set `CLAUDE_CODE_OAUTH_TOKEN` in `.env` (ambient fallback) or reference it from a profile's `oauth_token: $CLAUDE_CODE_OAUTH_TOKEN`.
+  - *API key:* set `ANTHROPIC_API_KEY` in `.env`, or use `api_key: $ANTHROPIC_API_KEY` per profile.
+  - The two are mutually exclusive on a single profile (agent-sdk's `ClaudeBackend` constructor throws).
+- **`codex` backend** —
+  - *Single account (typical):* run `codex login` once; ambient `~/.codex/auth.json` is read by default.
+  - *Multi-account:* per-profile `codex_home: runtime/codex-auth/<name>` in YAML; bootstrap each one with `CODEX_HOME=runtime/codex-auth/<name> codex login` (or `codex login --with-api-key` for an API-key-based profile).
+- **`openai` backend** — set `OPENAI_API_KEY` in `.env`, or per-profile `api_key: $OPENAI_API_KEY` (typed). Optional `base_url:`, `organization:`, `project:` for non-default endpoints. No OAuth path; subscription auth requires `codex` instead.
 - **`vercel` backend** — per-profile `api_key:` in YAML (typically referenced via `$NAME` from `.env`).
 
 Document this in the user-facing setup notes the build emits.
@@ -71,13 +76,13 @@ terminal:
 
 ### `config/.env`
 
-Holds secrets referenced from the YAML files via `$NAME` substitution, plus the per-backend auth env vars listed below. Gitignored by the build.
+Holds secrets referenced from the YAML files via `$NAME` substitution. Gitignored by the build.
 
-Per-backend env vars (only the ones for backends actually used in `models.yaml` need values):
+Auth env vars (used either as ambient fallbacks when no typed YAML field is set, or as values referenced by typed fields via `$NAME`):
 
 - `CLAUDE_CODE_OAUTH_TOKEN` — populated by `claude setup-token`. Used by the `claude` backend (subscription).
-- `ANTHROPIC_API_KEY` — alternative for the `claude` backend (metered API), and required by `vercel` profiles using `provider: anthropic`.
-- `OPENAI_API_KEY` — used by the `codex` backend (metered API; OAuth lives in `~/.codex/auth.json`), the `openai` backend (only auth path), and `vercel` profiles using `provider: openai`.
+- `ANTHROPIC_API_KEY` — used by the `claude` backend (metered API) and `vercel` profiles using `provider: anthropic`.
+- `OPENAI_API_KEY` — used by the `openai` backend and `vercel` profiles using `provider: openai`. (Codex auth lives in `~/.codex/auth.json`, populated by `codex login`; this env var is not consulted by the codex app-server.)
 
 Self-edit toggling and `spec/` write protection are now OS-level — see `architecture.md` → Self-modification. No `PROTOS_SELF_EDIT` env var.
 
@@ -85,7 +90,13 @@ Channel-specific credentials (including the owner's ID on that platform) are lis
 
 ### Migrating from legacy env-only deployments
 
-If the user is updating from a pre-YAML deployment (where `AI_MODEL` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `PRIMARY_CHANNEL` / per-channel env vars were read directly by the runtime), synthesize `config/models.yaml` and `config/channels.yaml` from those env vars. The synthesized `default:` profile uses `backend: vercel` plus the `provider:` field that matches the legacy AI_MODEL provider, so the migration is purely a config rewrite — no behavior change. Users can flip to `backend: claude` or `backend: codex` afterward to pick up subscription billing. Reference each secret by `$NAME` rather than inlining, so the existing `.env` keeps holding the credentials. Show the user the generated YAML for review before writing; don't touch the original `.env`. The runtime does NOT read the legacy model/channel env vars — the YAML files do, via substitution.
+If the user is updating from a pre-YAML deployment (where `AI_MODEL` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `PRIMARY_CHANNEL` / per-channel env vars were read directly by the runtime), synthesize `config/models.yaml` and `config/channels.yaml` from those env vars. Default migration target depends on `AI_MODEL`:
+
+- Anthropic model → `backend: claude` with `api_key: $ANTHROPIC_API_KEY` (preserves the existing API-key auth; no behavior change). The user can later flip to `oauth_token: $CLAUDE_CODE_OAUTH_TOKEN` after running `claude setup-token` if they want subscription billing — same backend, just different auth field.
+- OpenAI model → `backend: openai` with `api_key: $OPENAI_API_KEY`. Or `backend: codex` if the user wants subscription billing (requires `codex login` once).
+- Local / OpenAI-compatible model → `backend: vercel` with `provider: openai-compatible` and `base_url:` / `api_key:` fields.
+
+Reference each secret by `$NAME` rather than inlining, so the existing `.env` keeps holding the credentials. Show the user the generated YAML for review before writing; don't touch the original `.env`. The runtime does NOT read the legacy model/channel env vars — the YAML files do, via substitution.
 
 ## Step-by-step
 
@@ -310,7 +321,7 @@ The entry point (`agent/src/index.ts`):
 5. Starts the scheduler
 6. Logs that it's running
 
-On any config-load failure (missing file, invalid YAML, unresolved pointer, missing `$NAME` env var, missing directive reference, **missing per-backend auth env var** for any used backend — `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` for `claude`; `OPENAI_API_KEY` or `~/.codex/auth.json` for `codex`; `OPENAI_API_KEY` for `openai`), the process exits non-zero with a clear error message to stdout/stderr. The bash wrapper can't reasonably replicate this validation (YAML parsing, pointer resolution, env substitution), so it relies on a post-start health check (step 9) to surface early-exit failures by tailing the log.
+On any config-load failure (missing file, invalid YAML, unresolved pointer, missing `$NAME` env var, missing directive reference, **missing auth source** for any profile that doesn't set a typed auth field — i.e. `claude` with no `oauth_token:`/`api_key:` AND no ambient `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY`; `codex` with no `codex_home:` AND no `~/.codex/auth.json`; `openai` with no `api_key:` AND no ambient `OPENAI_API_KEY`), the process exits non-zero with a clear error message to stdout/stderr. The bash wrapper can't reasonably replicate this validation (YAML parsing, pointer resolution, env substitution), so it relies on a post-start health check (step 9) to surface early-exit failures by tailing the log.
 
 That's it. No HTTP server needed unless a channel requires a webhook.
 
