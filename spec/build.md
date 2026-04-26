@@ -113,6 +113,7 @@ A short list of code-level rules. Each has an anchor — a concrete failure mode
 - **`@typescript-eslint/no-unsafe-call` / `-member-access` / `-assignment` / `-argument` / `-return`** — the downstream effects of `any` slipping in via JSON parsing, untyped imports, etc. Catches drift even when the cast itself isn't visible. The discipline these push toward (typed parsers, schema validation at boundaries) is correct.
 - **`@typescript-eslint/no-unnecessary-type-assertion`** — flags redundant casts that linger after refactors and start lying about the type.
 - **`@typescript-eslint/ban-ts-comment`** — `@ts-ignore` and `@ts-expect-error` require a description of *why*. No silent suppression.
+- **`@typescript-eslint/no-unused-vars`** with `_`-prefix exemptions (`argsIgnorePattern`, `varsIgnorePattern`, `caughtErrorsIgnorePattern` all set to `^_`) — flags dead bindings and stale catch parameters. The `_`-prefix opt-out is the standard convention for "intentionally unused" so the names stay searchable.
 - **`no-empty`** with `allowEmptyCatch: false` — bare `catch {}` is a lint error. Catch blocks must either have code or a reason comment.
 
 Deliberately **skip** `tseslint.configs.stylistic` and `stylistic-type-checked` — those are formatting/style preferences (prefer `as const`, prefer `??` over `||`, etc.). Out of scope; we enforce correctness, not house style.
