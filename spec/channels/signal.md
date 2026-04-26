@@ -28,6 +28,15 @@ signal:
 2. Register or link a phone number
 3. Use `signal-cli` in daemon mode with JSON-RPC or poll for incoming messages
 
+## Non-text content
+
+Signal messages carry `dataMessage.attachments[]` with `contentType`, `id`, `filename`, `size`. signal-cli writes incoming attachments to its local attachment directory on receipt (default `~/.local/share/signal-cli/attachments/`).
+
+- **Image attachments** — for each attachment whose `contentType` starts with `image/`, read the bytes from signal-cli's local file (or call its `getAttachment` JSON-RPC method), hash (sha256), copy to `runtime/blobs/{sha256}.{ext}`, and attach as an `image` on the dispatched message. The message `text` is `dataMessage.message` if present, empty string otherwise.
+- **Non-image attachments** (audio, video, documents, stickers) — normalize to a placeholder string (e.g. `[voice message]`, `[document: receipt.pdf]`, `[sticker]`). Transcription and document parsing are out of scope for v1.
+
+See `architecture.md` → Storage → Attachments for the blob layout and event schema.
+
 ## Notes
 
 - signal-cli is a Java application — requires a JRE on the host

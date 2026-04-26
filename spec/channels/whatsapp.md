@@ -20,6 +20,15 @@ whatsapp:
 1. Install `@whiskeysockets/baileys` and `qrcode-terminal`
 2. On first run, scan the QR code with WhatsApp on your phone to link the device
 
+## Non-text content
+
+WhatsApp messages carry typed payloads: `imageMessage`, `audioMessage`, `videoMessage`, `documentMessage`, `stickerMessage`, etc.
+
+- **Images** (`imageMessage`) — download via Baileys' `downloadMediaMessage(msg, "buffer", {})`, hash (sha256), write to `runtime/blobs/{sha256}.{ext}` (extension from `imageMessage.mimetype`), and attach as an `image` on the dispatched message. The message `text` is `imageMessage.caption` if present, empty string otherwise.
+- **Audio (`audioMessage`), documents (`documentMessage`), video (`videoMessage`), stickers (`stickerMessage`)** — normalize to a placeholder string (e.g. `[voice message]`, `[document: receipt.pdf]`, `[video]`, `[sticker]`). Transcription and document parsing are out of scope for v1.
+
+See `architecture.md` → Storage → Attachments for the blob layout and event schema.
+
 ## Notes
 
 - Auth state (keys and session) should be persisted to disk so you don't need to re-scan on restart

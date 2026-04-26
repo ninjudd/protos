@@ -146,7 +146,7 @@ Use the Vercel AI SDK's `generateText` for automatic tool execution. Cap the mul
 - Wrap every `generateText` call through a **fallback-aware adapter**: on credit-exhausted, rate-limit, or provider 5xx errors, look up the resolved profile's `fallback:` (if any) and retry once with that profile's client. Auth and 4xx-other errors pass through — don't mask config bugs.
 - The agent receives conversation history (the current message is already the last entry). Pass it directly to the SDK as the messages array.
 - Cap conversation history at the 100 most recent events (backward-aligned to a turn boundary — see `readEvents` above) to avoid blowing past token limits. Apply the cap when retrieving history, not in the agent. 100 gives comfortable slack over `nap`'s 50-event consolidation threshold so unconsolidated events stay in the agent's working context between `nap` runs.
-- Guard against oversized prompts. Estimate tokens using a 4:1 character-to-token ratio. First, truncate any individual message over 10,000 tokens. Then, if the total (system prompt + messages) exceeds 150,000 tokens, drop the oldest messages until it fits.
+- Guard against oversized prompts. Estimate tokens using a 4:1 character-to-token ratio for text content, plus **~1500 tokens per image attachment** (Anthropic and OpenAI both bill in that neighborhood for typical resolutions). Without the per-image accounting, image-heavy threads silently sail past the cap and hit the LLM with a real token spike. First, truncate any individual message over 10,000 tokens (text only — don't drop image parts mid-message). Then, if the total (system prompt + messages) exceeds 150,000 tokens, drop the oldest messages until it fits.
 
 #### System prompt assembly
 

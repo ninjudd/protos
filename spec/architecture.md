@@ -132,6 +132,8 @@ Because thread history is stored as append-only JSONL files, any channel with di
 
 **Render filter.** The JSONL contains the full event stream (user messages, assistant steps with tool calls, tool results — see [Storage → Event schema](#event-schema)). The user-facing conversation is a collapsed view of that stream: for each `turn_id`, only the last non-empty, non-`NO_REPLY` assistant text is shown, and intermediate tool-call / tool-result events are hidden. (`NO_REPLY` is a lifecycle marker per the [Channel `send()` contract](#channel-send-contract), not a message — render the same way: skip it.) Watch-based channels (e.g. terminal) must apply this filter server-side before emitting to clients; push-based channels (e.g. telegram) receive the final reply from the router's `send()` call and don't need to filter.
 
+User events carry their `attachments` field through the filter unchanged; each channel decides how to display each attachment per its capability (render thumbnails inline, show `[image]` placeholders, skip non-text-capable parts). Channels with no media-display path should still render the surrounding text.
+
 This gives any client-server channel "pick up where I left off" semantics across reconnects — messages queued while no client was connected (e.g., cron firing at night) are delivered on next connect. See the terminal channel for the reference implementation.
 
 ### 2. Router
@@ -395,18 +397,24 @@ When the agent runs, the router reads the JSONL and reconstructs a `CoreMessage[
 
 **Attachments on user messages.** If a user event has `attachments`, the reconstructed CoreMessage becomes a content-parts array: the `[sent …]`-prefixed text as the first text part, followed by one image part per attachment (loaded from its `path`). Events without attachments stay as plain string content. The AI SDK accepts both shapes per message.
 
+**Replay safety.** When loading an attachment's bytes during reconstruction, verify the resolved absolute path is under `runtime/blobs/` — reject anything that escapes (e.g. a crafted `path: "../etc/passwd"` would otherwise read host files into the prompt). The existing path helper handles this; just call it. **Missing blobs** (cleanup, partial sync, machine swap) get replaced with a `[image unavailable: <path>]` text part and a logged warning; the rest of the conversation continues. Don't fail the whole call — a missing blob from months ago shouldn't break today's reply.
+
 #### Append cadence and writers
 
 - **Append-only writes.** The router serializes per-conversation, so there's never a concurrent writer on the same file.
 - Each event is appended as it happens (user message → user event; assistant step → assistant event; tool call → tool event). One agent invocation typically appends multiple events.
 - **Reads** load the whole file and parse it line-by-line; for a personal assistant this is fine even across years of conversation.
-- **Backup** is just copying the directory.
+- **Backup** is copying both `runtime/threads/` and `runtime/blobs/` together. The threads JSONL references blobs by path; without the bytes, replay produces missing-blob warnings rather than the original images.
 
 ### Attachments (`runtime/blobs/`)
 
 Inbound media (images today; audio and documents stay as placeholders for v1) is stored as content-addressed blobs at `runtime/blobs/{sha256}.{ext}`. Thread events reference blobs by workspace-relative path in their `attachments` field; content addressing deduplicates repeat-sent media automatically.
 
-The channel adapter is responsible for downloading bytes, hashing them, writing under `runtime/blobs/`, and attaching `{ type, path, media_type }` to the dispatched message. Channels without attachment support never touch this directory. Blobs are kept indefinitely — small, useful for replay, and cheap.
+The channel adapter is responsible for downloading bytes, hashing them, writing under `runtime/blobs/`, and attaching `{ type, path, media_type }` to the dispatched message. Channels without attachment support never touch this directory.
+
+Blobs are kept indefinitely — there is no automatic retention. Modern phone photos are MB-scale per file, so the directory grows over time; clean up manually or add a cleanup cron once it matters.
+
+**Cron exposure.** Cron jobs with `history: primary` reconstruct recent thread events into context on every firing — including any attachments those events carry. Image-heavy threads multiply the per-firing token cost. If a job (e.g. heartbeat) doesn't actually need recent conversation context, switch it to `history: none`.
 
 ### Cron logs (`runtime/logs/cron/`)
 

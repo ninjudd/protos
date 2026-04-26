@@ -24,6 +24,16 @@ discord:
 3. Invite the bot to your server with appropriate permissions
 4. Install `discord.js`
 
+## Non-text content
+
+Discord messages can carry attachments (`message.attachments`), embeds, stickers, and reactions.
+
+- **Image attachments** — for each attachment whose `contentType` starts with `image/`, fetch the bytes from `attachment.url` (Discord CDN URLs don't require auth), hash (sha256), write to `runtime/blobs/{sha256}.{ext}` (extension from `contentType`), and attach as an `image` on the dispatched message. The message `text` is `message.content` (often empty for image-only posts).
+- **Non-image attachments** (pdf, audio, video, …) and **stickers** — normalize to a placeholder string (e.g. `[document: report.pdf]`, `[sticker: WumpusWave]`). Transcription and document parsing are out of scope for v1.
+- **Embeds** — the auto-generated link-preview cards. Ignore for v1; the link itself is in `message.content`.
+
+See `architecture.md` → Storage → Attachments for the blob layout and event schema.
+
 ## Notes
 
 - discord.js handles the gateway WebSocket natively — no HTTP server needed
