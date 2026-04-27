@@ -35,10 +35,10 @@ The native impls have their own provider stories (Anthropic curates, OpenAI does
 
 ## Tavily wiring
 
-Lives in `agent/src/tools/impls/tavily.ts`, exported as `tavilySearchExecute` and registered via `withImpls(canonicalTools, { webSearch: tavilySearchExecute })` at `Agent` construction time on Vercel profiles.
+Lives in `agent/src/tools/impls/tavily.ts`, exported as `tavilySearchExecute` and registered via `withImpls(canonicalTools, { webSearch: tavilySearchExecute })` at `Agent` construction time **on Vercel profiles where `TAVILY_API_KEY` is set**.
 
 - **Endpoint:** `POST https://api.tavily.com/search`
-- **Auth:** `Authorization: Bearer $TAVILY_API_KEY`. The env var is referenced from `config/.env`. If unset and a Vercel profile is in use, the Backend construction surfaces the missing key as a clear startup error rather than failing per-call.
+- **Auth:** `Authorization: Bearer $TAVILY_API_KEY`. The env var is referenced from `config/.env`. **Optional** — if unset, skip the `withImpls` registration entirely and let `webSearch` fall back to agent-sdk's default no-op behavior on Vercel. The model sees an empty result on call and can either tell the user that web search isn't configured for this profile or fall back to `browser_fetch` against a known URL. Don't error at startup; not every Vercel deployment wants web search, and the other backends (`claude`/`codex`/`openai`) have native search and don't need Tavily at all.
 - **Body:** `{ query, max_results: 5, search_depth: 'basic', include_answer: true }`.
 - **Response mapping:**
   - `results[].{title, url, content}` → canonical search-result shape.
