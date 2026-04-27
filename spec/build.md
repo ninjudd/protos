@@ -24,6 +24,7 @@ Don't worry about the assistant's name or personality — those are configured o
 - `tsx` — TypeScript execution without a compile step. The agent can modify its own source and restart to apply changes.
 - `zod` — schema validation, used by agent-sdk for tool parameter definitions
 - `eslint`, `typescript-eslint` (devDependencies) — bug-preventing lint rules. Configured with `tseslint.configs.recommendedTypeChecked` (type-aware, no style enforcement). See "Implementation conventions" below for the rules and rationale.
+- `playwright`, `@mozilla/readability`, `jsdom` — power the `browserFetch` custom tool (single-shot rendered fetch with article extraction). Readability needs jsdom because it parses against a DOM. Also requires a Chromium binary installed via `npx playwright install chromium` — see step 1.
 - Channel-specific libraries — see the chosen recipe in `spec/channels/`
 
 agent-sdk pulls in the underlying SDKs (`@anthropic-ai/claude-agent-sdk`, the Codex app-server bridge, `@openai/agents`, `ai` + `@ai-sdk/anthropic` / `@ai-sdk/openai` / `@ai-sdk/openai-compatible`) as transitive dependencies — they install with agent-sdk. There's nothing to install separately for the four backends.
@@ -142,10 +143,11 @@ These don't have a clean lint rule but matter:
 - Source code goes in `agent/src/` per the file structure in `architecture.md`.
 - Use `process.cwd()` for the workspace root path, not `import.meta.dirname` — tsx runs in CJS mode where `import.meta.dirname` is undefined. The wrapper script ensures the process runs with the workspace root as cwd.
 - Create `agent/eslint.config.mjs` extending `tseslint.configs.recommendedTypeChecked` with type-aware analysis enabled (`languageOptions.parserOptions.project: ['./tsconfig.json']`). See "Implementation conventions" above for the rule list and rationale. Add `"lint": "eslint src"` and `"typecheck": "tsc --noEmit"` to `agent/package.json`'s `scripts`. Both run from inside `agent/` (where `node_modules/` lives).
+- After `npm install`, run `PLAYWRIGHT_BROWSERS_PATH=$WORKSPACE_ROOT/vendor/chromium npx playwright install chromium` (substituting the absolute path to the workspace root for `$WORKSPACE_ROOT`) to download the ~165MB Chromium binary `browserFetch` needs. The binary lands at `vendor/chromium/` per `architecture.md` → `vendor/`. The same `PLAYWRIGHT_BROWSERS_PATH` must be exported by `agent/protos` (the wrapper script) before launching the daemon so Playwright finds the binary at runtime — see step 9 for the export. The build script verifies the binary is present before declaring success. Workspace-local install (rather than Playwright's default `~/Library/Caches/ms-playwright/`) keeps the dependency self-contained, makes the version pin in `agent/package.json` directly correspond to the on-disk binary, and avoids cache collisions with other Playwright projects on the same machine.
 - Create `config/` if it doesn't exist (the agent should do this on first run, but the build can pre-create it). Write three templates:
   - `config/models.yaml` — a single `default:` profile with `backend: claude` and a current Claude Sonnet model ID. The user runs `claude setup-token` once to populate `CLAUDE_CODE_OAUTH_TOKEN` (subscription billing). The user can edit to pick a different backend (`codex`, `openai`, `vercel`), add providers, or add more profiles. Drop a comment in the template pointing at `architecture.md` → Model selection → Backends.
   - `config/channels.yaml` — `primary:` pointing at the user's chosen channel, one block for that channel with credentials referenced via `$NAME`, and a `terminal: { enabled: true }` block.
-  - `config/.env` — template containing the `$NAME` variables the YAML references (e.g. `TELEGRAM_BOT_TOKEN=`) plus stubs for the per-backend auth env vars from the Configuration section (`CLAUDE_CODE_OAUTH_TOKEN=`, `ANTHROPIC_API_KEY=`, `OPENAI_API_KEY=`), blank for the user to fill in.
+  - `config/.env` — template containing the `$NAME` variables the YAML references (e.g. `TELEGRAM_BOT_TOKEN=`) plus stubs for the per-backend auth env vars from the Configuration section (`CLAUDE_CODE_OAUTH_TOKEN=`, `ANTHROPIC_API_KEY=`, `OPENAI_API_KEY=`), plus `TAVILY_API_KEY=` (used by `browserFetch`'s sibling, the Tavily Search override on Vercel), blank for the user to fill in.
 
 ### 1a. Initialize Git repos for agent/, config/, memory/
 
@@ -240,6 +242,11 @@ The canonical tools (`bash`, `read`, `write`, `edit`, `glob`, `grep`, `webFetch`
 - Agent control: `delegate_task` (protos's skill-aware sub-agent — see step 4d)
 - Consolidation (used by `nap`/`dream` crons): `list_threads`, `read_thread_tail`, `advance_thread_cursor`
 - Memory hygiene: `find_orphans`
+- Web access (heavy tier): `browser_fetch` — single-shot Chromium render with Readability cleanup. Ships on every backend. Singleton browser process; lazy-launched on first call.
+
+**Canonical-tool overrides** (one file each in `agent/src/tools/impls/`, wired through agent-sdk's `withImpls`, not standalone tools):
+
+- `tavily.ts` — `webSearch` override on the Vercel backend (no native default there). One recipe: `spec/tools/web_search.md`.
 
 Implementation conventions:
 
@@ -376,6 +383,8 @@ The script must be invoked from the workspace root (the parent of `agent/`). It 
 
 Run the process with `npx tsx agent/src/index.ts` (not compiled JS). This way the agent can modify its own TypeScript source and restart to apply changes — no compile step needed.
 
+**Export `PLAYWRIGHT_BROWSERS_PATH=$WORKSPACE_ROOT/vendor/chromium`** before launching `npx tsx ...` (in `start`, `restart`, and the `chat`-launches-daemon path if any). Without this, Playwright defaults to its global cache (`~/Library/Caches/ms-playwright/`) and `browserFetch` fails to find the binary the build installed under `vendor/chromium/`. The `cron` and `status` subcommands don't need it — they don't construct an `Agent`.
+
 Use a PID file at `runtime/agent.pid` and write logs to `runtime/logs/`. Both are gitignored. Append to the log file — don't truncate it on restart.
 
 **`stop` must kill the entire process tree, not just the PID file's PID.** `npx tsx agent/src/index.ts` produces a multi-process tree (npm wrapper + tsx node child). If `stop` only kills the root PID, the children get re-parented to init and survive — invisible to the wrapper, still polling channels, still firing scheduled jobs. Each `restart` then leaks a zombie daemon. The wrapper must walk the process tree (e.g. via `pgrep -P` recursive descent — available on both macOS and Linux) and signal every descendant. Send SIGTERM first, give the tree a few seconds to shut down gracefully, then SIGKILL anything still alive.
@@ -398,6 +407,8 @@ Verify the build before handing it off:
 
 - `tsc --noEmit` (against `agent/tsconfig.json`) passes with no errors
 - `eslint src` (from inside `agent/`) passes with no errors
+- `vendor/chromium/` exists and contains a Chromium build directory (e.g. `vendor/chromium/chromium-*/chrome-mac/` on macOS, `vendor/chromium/chromium-*/chrome-linux/` on Linux). Spot-check via `ls vendor/chromium/`.
+- `PLAYWRIGHT_BROWSERS_PATH=$PWD/vendor/chromium node -e "require('playwright').chromium.executablePath()"` from inside `agent/` exits 0 and prints a path under `vendor/chromium/` (the binary is installed and Playwright resolves it from the workspace-local cache).
 - `agent/protos start` with blank credentials fails and shows the error in the terminal
 - `agent/protos start` with blank credentials then `agent/protos status` reports not running
 - `config/SOUL.md` does not exist yet (it's written on first run, not by the build)
@@ -426,6 +437,7 @@ For the `update` command — sync an existing implementation when the spec evolv
 6. **Migrate data layouts when the spec changes them.** When a spec change alters where data lives (file paths, directory shape, JSONL schema), `update` should migrate the existing data automatically if there's a deterministic mapping. Show the user the planned migration before applying, and commit inside the affected domain repo (`config/` or `memory/`); `runtime/` is unversioned, so just log what moved. Known migrations the `update` command should detect and run:
    - **Legacy `.env` → YAML config** — synthesize `config/models.yaml` and `config/channels.yaml` from existing env vars per the "Migrating from legacy env-only deployments" section. Commit inside `config/`.
    - **Flat threads JSONL → per-profile threads directory** *(introduced by the agent-sdk migration)* — for each existing `runtime/threads/{channelId}/{conversationId}.jsonl`, mkdir `runtime/threads/{channelId}/{conversationId}/` and move the JSONL to `{conversationId}/{default-profile}.jsonl` (where `{default-profile}` is the resolved name of the `default:` profile in `models.yaml`). Move any sibling `{conversationId}.cursor` to `{conversationId}/{default-profile}.cursor` the same way. No `.continuation` sidecar is created — the first dispatch after migration falls into the case-3 / case-5 path (fresh session with full prior history as recap), which is the right behavior since pre-migration threads have no backend session token to resume.
+   - **Chromium binary → `vendor/chromium/`** *(introduced when `browserFetch` shipped)* — if `vendor/chromium/` is missing, run `PLAYWRIGHT_BROWSERS_PATH=$WORKSPACE_ROOT/vendor/chromium npx playwright install chromium` (per build step 1). If a previous Playwright install in the global cache (`~/Library/Caches/ms-playwright/` or `~/.cache/ms-playwright/`) is the only copy on the machine, leave the global cache alone — it's used by other Playwright projects on the same host. The vendor copy and the global cache coexist; the agent only sees the vendor one because of `PLAYWRIGHT_BROWSERS_PATH`.
 
 End with a clean working tree in `agent/`, same invariant as build.
 

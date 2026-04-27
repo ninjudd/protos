@@ -48,11 +48,14 @@ Granular files, not one consolidated file — Git history is more useful when ch
 
 ### `vendor/` — external tooling
 
-Third-party tools the agent shells out to: cloned repos, editable installs, anything that lives outside the protos codebase but the agent uses regularly. One subdirectory per vendored tool (`vendor/browser-harness/`, …), each its own external Git repo with its own lifecycle.
+Third-party tooling installed at known paths under `vendor/`. Two flavors today:
 
-Per-instance and gitignored by this repo. Skills that depend on a vendored tool name the canonical install path (`vendor/{name}/`) so the agent has one place to look. The agent may edit files inside `vendor/` (per the relevant skill — typically by delegating to a coding agent), but those edits are local to the vendored repo, not commits in `agent/` or `spec/`.
+- **Cloned source repos** (`vendor/browser-harness/`, …) — each its own external Git repo with its own lifecycle. Set up on demand by the relevant skill.
+- **Downloaded binaries** (`vendor/chromium/`) — tooling fetched by an external installer (e.g. Playwright's `npx playwright install chromium` writes here when `PLAYWRIGHT_BROWSERS_PATH=vendor/chromium`). Pinned by the Node-side package version (`agent/package.json`); the binary directory is the manifestation of that pin on disk.
 
-Empty by default — vendored tools are opt-in, installed when a skill walks the owner through setup.
+Per-instance and gitignored. Skills, tools, and the build script name the canonical install path (`vendor/{name}/`) so the agent and its tooling have one place to look. The agent may edit files inside cloned-repo vendors per the relevant skill (typically via a coding agent), but those edits are local to the vendored repo, not commits in `agent/` or `spec/`. Binary vendors are read-only — the installer manages them.
+
+Empty by default — vendored tooling is opt-in. `vendor/chromium/` ships during `build` because `browserFetch` is bundled; cloned-repo vendors install when their skill walks the owner through setup.
 
 ### `runtime/` — ephemeral state
 
@@ -163,8 +166,8 @@ The agent is the brain. It uses [agent-sdk](https://github.com/ExProtos/agent-sd
 - `edit(path, old_string, new_string)` — surgical find-and-replace
 - `glob(pattern)` — file pattern matching
 - `grep(pattern, path?)` — content search
-- `webFetch(url)` — fetch a URL and return content as markdown
-- `webSearch(query)` — web search; native on Claude/Codex/`openai` (hosted `web_search`); silent no-op on Vercel until a `withImpls` provider is wired
+- `webFetch(url)` — fetch a URL and return content as markdown. Native on Claude/Codex/`openai`; bundled node-fetch on Vercel. HTTP only — no JS execution. Pair with `browserFetch` (custom tool below) for JS-heavy pages.
+- `webSearch(query)` — web search. Native on Claude/Codex/`openai` (hosted `web_search`); Tavily Search on Vercel via `withImpls` (see `spec/tools/web_search.md`).
 - `todo(todos)` — task list (native on Claude/Codex; in-memory state with system-prompt re-injection on Vercel/`openai`)
 - `task({prompt, subagent_type})` — spawn a focused SDK-level sub-agent (see [Sub-agents](#sub-agents))
 
@@ -175,9 +178,20 @@ The agent is the brain. It uses [agent-sdk](https://github.com/ExProtos/agent-sd
 - `rename_memory(oldName, newName)` — move/rename a memory file and rewrite `[[wiki-links]]` so every reference resolves to the same file it did before
 - `add_journal_entry(text)` — append a timestamped line to today's journal
 - `delegate_task({ prompt, skills, tools, model? })` — protos's skill-aware sub-agent (see [Sub-agents](#sub-agents))
+- `browserFetch(url)` — fetch a URL through headless Chromium (Playwright) with Mozilla Readability cleanup. Use for JS-heavy pages, paywalled article previews, and sites that bot-block plain `webFetch`. Available on every backend. See `spec/tools/browser_fetch.md`.
 - Plus consolidation/orphan-finder helpers used by cron jobs
 
 Memory-aware tools (`find_memory`, `add_memory`, `rename_memory`) take names in **wiki-link form** — no `memory/` prefix, no `.md` extension. They return full workspace paths (e.g. `memory/preferences/coffee.md`) in their output for interop with `read`.
+
+**Three-tier web access ladder.** The agent has three increasingly heavy ways to reach a URL — pick the lightest one that works:
+
+| Tool | Mechanism | When |
+|---|---|---|
+| `webFetch` | HTTP only | Static pages, docs, JSON, anything where a plain fetch would work |
+| `browserFetch` | Single-shot render in **headless Chromium**, anonymous (no shared session with the user's Chrome) | JS-heavy pages, bot-blocked URLs, paywalled article previews where a logged-out browser still gets useful content |
+| `browser-use` (skill) | Attaches to the user's **real Chrome** via CDP (`127.0.0.1:9222`); inherits the logged-in session | Multi-page flows, form fill, login, anything requiring the user's session or stateful navigation |
+
+`browserFetch` and `browser-use` are deliberately separate — one is anonymous-and-cheap, the other is signed-in-and-expensive. They don't share session state.
 
 Users can add their own tools directly in `agent/src/tools/` alongside the bundled custom set. agent-sdk handles the tool execution loop natively — the per-backend turn cap (default 25) prevents runaway tool use.
 
@@ -742,6 +756,9 @@ agent/
       read_thread_tail.ts
       advance_thread_cursor.ts
       find_orphans.ts
+      browser_fetch.ts
+      impls/                  # withImpls executes for canonical tools (not standalone tools)
+        tavily.ts             # webSearch override on Vercel
     agents/           # delegate_task sub-agent runner (single generic file, no per-agent definitions)
       runner.ts
 
@@ -769,6 +786,7 @@ memory/
 # External tooling — gitignored, each subdir is its own external repo
 vendor/
   browser-harness/    # cloned + installed by the browser-use skill on demand
+  chromium/           # Playwright's Chromium binary (browserFetch); installed at build via PLAYWRIGHT_BROWSERS_PATH
   ...                 # one subdir per vendored tool
 
 # Ephemeral — gitignored, never a repo
@@ -793,6 +811,9 @@ runtime/
     openai/
       {continuation}.jsonl
   blobs/              # content-addressed media (sha256-named) referenced by thread events
+  browser-sessions/   # browserFetch persistent contexts, keyed by `session` arg (one user-data-dir per name)
+    nyt/
+    reddit/
   clients/            # per-client cursor files
     chat.cursor       # default terminal client
   logs/
