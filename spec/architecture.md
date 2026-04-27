@@ -726,6 +726,7 @@ spec/
     memory.md
     update.md
     browser-use.md
+    debug.md
   cron/               # default cron jobs (markdown with frontmatter)
     heartbeat.md
     nap.md
