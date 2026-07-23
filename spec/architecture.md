@@ -393,6 +393,8 @@ Frontmatter fields:
   - `primary` — the agent runs with the primary channel's owner conversation as context, capped at the most recent events (see `build.md` → step 4 for the exact cap and the turn-alignment rule). Use for outreach-style jobs that may want to reference recent activity (e.g. heartbeat).
   - `none` — the agent runs with no thread history; only the cron body is in context. Use for internal/background jobs that don't depend on a conversation (e.g. consolidation jobs that delegate to a sub-agent and write to memory).
 
+**Late-fire tolerance.** The scheduler must fire a job whose wake-up is up to 30 seconds late — long-idle timers on macOS get coalesced by App Nap and consistently drift a few seconds past the target second. A strict "wall-clock must equal the scheduled second" gate silently drops daily jobs (e.g. a 23:15 job whose only wake in a 15-minute quiet window fires at 23:15:02). Jobs that miss by more than the tolerance advance to the next scheduled time; they don't queue up.
+
 **Layering.** When a file with the same name appears in both roots, the merged job uses:
 
 - **Frontmatter:** config overrides spec (e.g., `schedule:` in config replaces spec's).
