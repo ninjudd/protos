@@ -10,3 +10,6 @@
 !/AGENTS.md
 !/spec/
 !/plan/
+
+# macOS Finder metadata, ignored at any depth
+.DS_Store

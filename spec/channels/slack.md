@@ -77,6 +77,43 @@ The `log_level` field in `channels.yaml` defaults to `warn`. Bump to `info` whil
 
 **Recovery is out of scope for this section.** The agent process cannot self-restart via the `agent/protos` wrapper — the wrapper runs as a child of the daemon, so killing the daemon tears down the wrapper subprocess before it reaches the start step. Recovery designs go through an external supervisor (launchd, systemd, etc.) or in-process re-registration, addressed separately once the diagnostics here have identified the actual failure mode.
 
+## Home tab
+
+The Slack app Home tab can serve as a personal dashboard for the owner. When the owner opens the Home tab, Slack fires an `app_home_opened` event; the channel handles it and publishes a Block Kit view via `views.publish`.
+
+### Enabling
+
+Go to api.slack.com → your app → Features → App Home → toggle **Home Tab** on. Also enable **Messages Tab** if you want the owner to send DMs from the app tab.
+
+Required additional bot scopes: `users:read` (to fetch the owner's display name).
+
+### View contents
+
+The published view should include:
+
+1. **Header** — a time-aware greeting using the owner's display name fetched via `users.info` (`display_name` preferred, `real_name` fallback, `"there"` if the API call fails)
+2. **Context** — the app icon (fetched once at startup via `users.info` on the bot user, `image_72`) and today's date
+3. **Last note** — the most recent journal line from `memory/journal/YYYY-MM-DD.md` that is not a TODO, header, or timestamp line
+4. **Open TODOs** — lines from today's journal containing `TODO:`, stripped of the prefix, up to 5 items, with a count in the section heading
+5. **Action buttons** — one per row, each dispatching a fixed prompt to the router as if the owner had typed it:
+   - 🗓️ Start weekly review → `"start my weekly review"`
+   - ☀️ Start my day → `"let's start my day"`
+   - 🌙 Daily review → `"let's do a daily review"`
+   - 📝 Add a note → `"I want to add a note"`
+6. **Refresh button** — re-publishes the view without dispatching to the router
+
+### Owner guard
+
+Only publish the view when `event.user === ownerUserId`. Ignore all other users.
+
+### Refresh
+
+Extract the view-publishing logic into a `publishHomeView()` helper inside `createChannel()`. Both the `app_home_opened` event handler and the refresh button action call this helper, so the view is always built from the same code path.
+
+### Action routing
+
+Register a single `app.action(/^home_/)` handler. On click: ack immediately, then either re-publish (refresh) or post the prompt text as a chat message to the owner's DM channel and dispatch it to the router.
+
 ## Notes
 
 - Socket Mode connects via WebSocket — no HTTP server or public URL needed
