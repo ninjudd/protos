@@ -123,6 +123,20 @@ This contract is general — any new channel MUST handle the `NO_REPLY` marker c
 
 If a `router.dispatch` call throws, the channel's error handler replies to the owner with the actual error message (e.g. `dispatch error: Your credit balance is too low…`). No generic placeholder — the audience is one person and the real error is what tells them what to fix.
 
+#### Progress updates (long-running turns)
+
+A single agent invocation can run for a while — a chain of tool calls, a long web fetch, a multi-step task. The router calls `send()` only once, at the end, so without extra signalling the owner sees the receipt ack and then silence until the final reply lands.
+
+Channels MAY export an optional `sendProgress(text)` alongside `send()` to surface intermediate status while a turn is still running. The router drives it from the agent's own event stream, for **interactive user turns only** (never cron — a cron firing has no live watcher):
+
+- **Intermediate narration.** The agent frequently narrates between steps ("Let me check the calendar first…") and then calls a tool. Each assistant text block that is followed by tool activity and then a *later* text block is, by definition, not the final reply — the router emits those confirmed-intermediate blocks via `sendProgress`. The block held when the stream ends is the real reply and goes to `send()` as usual. This narration is already recorded in the thread JSONL as normal assistant `text_end` events; `sendProgress` is a delivery path, not a new storage record.
+- **Silence heartbeat.** A single long, silent step (a 90-second fetch with no narration) produces no intermediate blocks. To cover it, the router also emits a generic "still working…" status if nothing has gone out for a silence window, labelled with elapsed turn time.
+- **Throttle.** Narration is rate-limited to at most one progress post per short interval so a tool-heavy turn doesn't flood the channel; the first update of a turn is always allowed.
+
+`sendProgress` is best-effort and MUST NOT affect the turn: a failed progress post is logged and swallowed, never surfaced as the reply. Progress posts are ephemeral status, not part of the rendered conversation — channels present them as visually subordinate (e.g. a muted / italic status line) and are free to omit the capability entirely, in which case the turn simply runs silent as before. `NO_REPLY` is unaffected: it is only ever the final `send()` value, never a progress update.
+
+Recommended defaults: throttle narration to ~10s between posts; emit a heartbeat after ~30s of silence.
+
 #### Cursor-based replay
 
 Because thread history is stored as append-only JSONL files, any channel with disconnecting clients can support replay with no server-side state. The pattern:

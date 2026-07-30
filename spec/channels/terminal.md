@@ -45,9 +45,12 @@ Unix socket at `runtime/agent.sock`. Messages are newline-delimited JSON.
 {"type": "live-start"}                         # caught up; now streaming live
 {"type": "thinking"}                           # protos is processing — render an indicator
 {"type": "message", "role": "user|assistant", "index": N, "text": "..."}
+{"type": "progress", "text": "..."}            # ephemeral mid-turn status — not stored
 ```
 
 The `thinking` event is broadcast to all connected clients when a user-originated message is dispatched to the router. It's **cleared implicitly when the next live `message` event arrives** — no explicit "thinking-stop" event needed. Cron-originated messages (heartbeat, etc.) do NOT trigger `thinking`, since no one is waiting on them.
+
+The `progress` event is this channel's implementation of the optional `sendProgress` from architecture.md → Progress updates (long-running turns). The channel broadcasts it to all connected clients while a turn is still running; unlike `message` it is **not backed by the JSONL**, carries no `index`, and must **not** advance the client's replay cursor — it's transient status that vanishes on reconnect. Clients render it as a visually subordinate line (e.g. dim/italic, above the prompt) and **leave the thinking indicator running** — the turn is still in flight, so `progress` does not clear it (only a live `message` does).
 
 ## Cursor-based replay
 

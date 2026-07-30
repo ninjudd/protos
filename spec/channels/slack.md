@@ -45,6 +45,15 @@ Slack has no bot-visible typing indicator, so the channel posts a short placehol
 - Post in the same channel, on the same thread (`thread_ts` from the inbound event for DM messages; the thread root — `event.thread_ts ?? event.ts` — for `app_mention`).
 - If the post fails (e.g. transient API error), log `[slack] ack failed: <msg>` and continue — the dispatch still runs. Failing the receipt must never prevent the message from reaching the router.
 
+## Progress updates
+
+Slack turns can run long, and `send()` only posts the final reply. To keep the owner informed on slow turns, the Slack channel implements the optional `sendProgress(text)` from architecture.md → Progress updates (long-running turns).
+
+- Post each progress update as a **new message in the same thread** as the turn — reuse the `conversationId`'s channel and `thread_ts`, exactly like `send()`.
+- Style it as a **muted status line**, visually distinct from a real answer: collapse newlines to one line and wrap the text in italics (`_…_`), or post a `context` block. Strip stray `_` from the text first so it doesn't break the italics.
+- Progress posts are **best-effort**: on any Slack API error, log `[slack] progress post failed: <msg>` and return — never throw. A failed status update must not break the turn.
+- The receipt ack ("Thinking…") stays; the progress updates and the final reply all land as follow-up messages in the thread. There is no edit-in-place.
+
 ## Markdown conversion
 
 The assistant writes standard markdown; Slack uses "mrkdwn", a similar but incompatible format. Convert messages before posting with a library like `slackify-markdown`. Key differences:
