@@ -6,26 +6,27 @@ preferred_model: reasoning
 
 # Browser use
 
-Two ways to read the web. Pick the cheap one first.
+Three ways to read the web, in increasing cost and blast radius. Pick the cheap one first.
 
 1. **`webFetch` tool** — anonymous reads of public-ish pages. Articles, GitHub HTML, docs, blog posts. No setup. **Try this first.** Behavior varies by backend (Claude/Codex use native hosted fetch with JS rendering; Vercel/`openai` use agent-sdk's bundled in-process impl; future plans swap that for Tavily Extract — see `plan/web-search-and-fetch.md`).
-2. **`browser-harness` CLI via `bash`** — a real, attached Chrome session with the owner's logins. Use only when `webFetch` can't do the job: signed-in pages, multi-step forms, clicks, file uploads, screenshots, anything CDP-only.
+2. **`browserFetch` tool** — single-shot headless-Chromium render with Mozilla Readability cleanup. Still anonymous (no shared session with the owner's Chrome), but executes JS and strips chrome down to the article body. Reach for it when `webFetch` returns junk because the page is JS-heavy, bot-blocks plain HTTP, or hides the article behind a paywall preview a logged-out browser still gets. See `spec/tools/browser_fetch.md`.
+3. **`browser-harness` CLI via `bash`** — a real, attached Chrome session with whatever sessions are signed in. Use only when neither anonymous tier works: signed-in pages, multi-step forms, clicks, file uploads, screenshots, anything CDP-only.
 
-If you're not sure which you need, try `webFetch` first. If it returns junk, an empty body, a login wall, or a captcha, escalate.
+Escalate left-to-right when the previous tier returns junk, an empty body, a login wall, or a captcha. Don't jump straight to `browser-harness` — `browserFetch` clears most JS-rendering and bot-blocking cases without spending the owner's logged-in session.
 
 ## Privacy
 
-`browser-harness` drives the owner's **real, logged-in Chrome**. Chrome itself spells out the implication when remote debugging is toggled on:
+By default `browser-harness` drives a **dedicated agent Chrome profile** at `~/.browserface/chrome` — separate from the owner's daily-driver Chrome. Cookies, history, tabs, and extensions are fully isolated. You can only see sites the owner has explicitly signed into the agent profile (typically Gmail, Slack, calendars — whatever the agent needs). The owner's banking, work email, and personal tabs in their own Chrome are unreachable, even if you tried.
 
-> Turning on this setting allows external apps to request full control of this browser. This includes read access to your saved data, cookies and site data, and the ability to navigate to any URL.
+Treat what the agent profile *does* contain as sensitive — it's still real session cookies for whatever services live there. Don't paste page contents into third-party services, don't log full screenshots, and prefer `delegate_task` for multi-step workflows so the raw context stays out of the main thread.
 
-You are one of those external apps. Treat the browser's output the way you'd treat the owner's own browsing — banking, email, work tools, all of it. Don't paste page contents into third-party services, don't log full screenshots, and prefer `delegate_task` for multi-step workflows so the raw context stays out of the main thread.
+If the owner explicitly opts into the daily-driver Chrome instead (see "Fallback" below), the trust model expands dramatically — anything in any tab is fair game. The cautions above apply with extra weight.
 
-For sub-agent or stealth work where the owner's primary Chrome is the wrong tool, browser-harness supports the cloud browsers from `cloud.browser-use.com`. See the upstream README before reaching for that.
+Remote handoff via `browser/share` exposes the bridge over the public internet. The auth flag is mandatory unless the owner explicitly waives it (see Sharing setup), regardless of which Chrome you're driving.
 
 ## One-time install
 
-Check whether browser-harness is already installed before doing anything:
+### browser-harness
 
 ```bash
 which browser-harness
@@ -40,28 +41,40 @@ uv tool install -e ./vendor/browser-harness
 
 If `uv` isn't installed, point the owner at https://docs.astral.sh/uv/ — don't try to install it for them, package managers are the owner's call.
 
-Verify install with `browser-harness --doctor` (this won't connect to Chrome yet — see the next section).
+### browserface
 
-## Chrome remote-debugging toggle
+```bash
+ls vendor/browserface/browser/start 2>/dev/null
+```
 
-The owner enables `browser-harness` access by ticking **"Allow remote debugging for this browser instance"** at `chrome://inspect/#remote-debugging`. The page shows "Server running at: 127.0.0.1:9222" once it's live. Unticking the same checkbox is the only off switch — `browser-harness` calls then fail at the connection step and you fall back to `webFetch`. (Uninstalling the binary doesn't help; this skill would just walk the owner through reinstalling it.)
+If missing:
 
-Whether they leave it on or toggle it per-task depends on the deployment:
+```bash
+git clone https://github.com/browserface/browserface vendor/browserface
+```
 
-- **Dedicated host** (e.g., a Mac Mini that just runs Protos) — leaving it on is fine. The machine isn't being used for the owner's everyday browsing, so there's nothing to be cautious about overlapping with.
-- **Daily-driver machine** (Protos shares Chrome with the owner's normal browsing) — the owner probably wants it off when they're not using you, and tick it before a task that needs the browser. While it's on, any local process can connect to `127.0.0.1:9222`, so off-by-default narrows that window.
+No global install — invoke as `vendor/browserface/browser/start` (or `…/browser/face`, `…/browser/share`) directly. Scripts bootstrap their own deps on first run.
 
-If you don't know which setup the owner has, ask once and save the answer to memory.
+### Sign into the agent profile
 
-Verify with `browser-harness --doctor`. If it can't reach Chrome, tell the owner what the error said rather than retrying blindly — the most likely cause is the checkbox is unticked.
+After both are installed, bring up the agent Chrome and ask the owner to sign into the sites you'll need:
 
-**Watch for the first-attach Allow popup.** Even when the toggle is on and `--doctor` reports `chrome running` + `daemon alive`, the very first connection of a session can pop a Chrome confirmation dialog ("Allow remote debugging…") that browser-harness can't auto-dismiss. The symptom is a `browser-harness` invocation that exits non-zero with stderr containing **`click Allow on chrome://inspect (and tick the checkbox if shown)`** — and `--doctor` keeps reporting healthy, so retrying is pointless. Treat that exact stderr as a wait-for-human signal: message the owner once asking them to click Allow in their Chrome window, then wait for their reply before retrying. Don't loop on it.
+```bash
+vendor/browserface/browser/start
+```
+
+This launches a Chrome window using the dedicated agent profile (`~/.browserface/chrome`). Tell the owner:
+
+> I've opened a Chrome window using the agent's dedicated profile. Please sign into [Gmail, Slack, …] in those tabs, then close the window when you're done. Cookies persist in this profile, so you only need to sign in once per site.
+
+Subsequent agent invocations reuse those sessions automatically. The owner's daily-driver Chrome is never touched.
 
 ## Usage
 
-Pipe Python to the CLI via heredoc. Helpers (`new_tab`, `wait_for_load`, `page_info`, `screenshot`, `click`, `type_text`, …) are preloaded — call them directly, don't import.
+Every invocation prefixes with the env-var bringup so `browser-harness` attaches to the dedicated agent profile rather than auto-discovering the owner's daily-driver Chrome:
 
 ```bash
+export BU_CDP_WS=$(vendor/browserface/browser/start)
 browser-harness <<'PY'
 new_tab("https://news.ycombinator.com")
 wait_for_load()
@@ -69,7 +82,15 @@ print(page_info())
 PY
 ```
 
-The full helper surface lives in `vendor/browser-harness/helpers.py`. Read it when you need to know what's available.
+`browser/start` is idempotent — fast no-op when the agent Chrome is already running. The `BU_CDP_WS` env var tells `browser-harness` which CDP endpoint to attach to (overriding its default profile-dir discovery, which would otherwise find the daily-driver Chrome and re-trigger the per-connect Allow popup on every invocation).
+
+Helpers (`new_tab`, `wait_for_load`, `page_info`, `screenshot`, `click`, `type_text`, …) are preloaded — call them directly, don't import. The full helper surface lives in `vendor/browser-harness/helpers.py`.
+
+If `browser-harness --doctor` reports it's attached to the wrong Chrome (the daemon got stuck on the daily-driver from a previous session, e.g. before the agent profile existed), kill the daemon so the next call re-bootstraps with the current `BU_CDP_WS`:
+
+```bash
+pkill -f browser-harness
+```
 
 ### Picking a click primitive
 
@@ -80,6 +101,83 @@ For anything addressable in the DOM (buttons, links, "Show more" expanders), pre
 ### Heavy or multi-step work → delegate
 
 Page contents and screenshots blow up context fast. For research, scraping, or any multi-step browser task, use `delegate_task` with `tools: ["bash"]` and a skill list that includes `browser-use`. The raw output stays in the sub-agent's context; only the summary comes back.
+
+## Handing off to the owner
+
+When the task hits something only a human can clear — login, 2FA, captcha, a confirmation you shouldn't auto-click — don't loop. Hand off via **browserface**, which gives the owner the same primitives (click, type, scroll, navigate) over a screenshot stream against the same agent Chrome you've been driving.
+
+Two modes:
+
+- **Local** (`vendor/browserface/browser/face`) — owner is at the same machine and opens `http://127.0.0.1:8768`.
+- **Remote** (`vendor/browserface/browser/share`) — fronts the bridge with an ngrok tunnel so the owner can take over from elsewhere (phone, another machine).
+
+`browser/face` defaults to the same agent profile, so the handoff is seamless: owner clears the wall in their tab, you resume on the same session.
+
+### Sharing setup
+
+`browser/share` requires two pieces of one-time owner setup.
+
+**1. ngrok authtoken.** Check:
+
+```bash
+ngrok config check
+```
+
+If it errors, walk the owner through `ngrok config add-authtoken <token>` using their token from https://dashboard.ngrok.com/get-started/your-authtoken. The token is the owner's ngrok account; don't try to mint or substitute one.
+
+**2. Default auth policy.** Check what browserface has saved:
+
+```bash
+vendor/browserface/browser/config show auth
+```
+
+If it prints `(unset)`, ask the owner what their auth policy should be and save it once:
+
+```bash
+vendor/browserface/browser/config set auth --oauth google --oauth-allow-email you@example.com
+```
+
+A remote share exposes the agent Chrome over the public internet, so `(unset)` means you stop and ask, not assume.
+
+Save to memory only the **stable domain** if they have one (e.g. `you.ngrok.app`). After setup, every share is:
+
+```bash
+vendor/browserface/browser/share you.ngrok.app
+```
+
+(drop the domain for a fresh assigned URL). `browser/share` reads the saved policy from `~/.browserface/auth` automatically.
+
+### When to launch
+
+- **You hit a wall** — tell the owner what you need and offer to start a session; don't keep retrying.
+- **Owner asks to watch or pair** — start one.
+
+Don't launch unprompted just in case. If `browser/config show auth` returns `(unset)`, walk the owner through the setup above before running.
+
+## Fallback: drive the owner's daily-driver Chrome
+
+When the owner explicitly wants the agent to use their everyday Chrome (with all their existing logged-in sessions — Gmail, work, banking — and matching extensions/themes), there are two opt-in paths.
+
+**`browser-harness`:** unset `BU_CDP_WS` so it falls back to its default discovery, which probes well-known profile dirs:
+
+```bash
+unset BU_CDP_WS
+browser-harness <<'PY'
+...
+PY
+```
+
+The owner has to enable Chrome's per-profile remote-debugging toggle once: tick **"Allow remote debugging for this browser instance"** at `chrome://inspect/#remote-debugging`. The page shows "Server running at: 127.0.0.1:9222" once it's live. Whether they leave it on or toggle it per-task depends on how comfortable they are leaving the door open while not using the agent.
+
+**`browser/face`:** pass `--discover`:
+
+```bash
+vendor/browserface/browser/face --discover
+```
+
+Both paths trigger Chrome's **per-connect Allow popup** the first time each new browser session attaches. The symptom is a non-zero exit with stderr containing **`click Allow on chrome://inspect (and tick the checkbox if shown)`**. Treat that exact stderr as a wait-for-human signal: message the owner once asking them to click Allow in their Chrome window, then wait for their reply. Don't loop.
+
+**Privacy:** in this mode you're driving the owner's full browsing — banking, work email, personal tabs, all of it. Apply the cautions in the Privacy section with extra weight, and prefer `delegate_task` more aggressively to keep raw page contents out of the main thread.
 
 ## Extending helpers.py
 
