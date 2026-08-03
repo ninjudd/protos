@@ -77,6 +77,10 @@ The `log_level` field in `channels.yaml` defaults to `warn`. Bump to `info` whil
 
 **Recovery is out of scope for this section.** The agent process cannot self-restart via the `agent/protos` wrapper — the wrapper runs as a child of the daemon, so killing the daemon tears down the wrapper subprocess before it reaches the start step. Recovery designs go through an external supervisor (launchd, systemd, etc.) or in-process re-registration, addressed separately once the diagnostics here have identified the actual failure mode.
 
+## Idempotent delivery
+
+Slack Socket Mode **re-delivers** any events that weren't acknowledged before a disconnect, so a dropped/reconnected socket (e.g. `ECONNRESET` → pong timeout → reconnect) replays the original message — and without a guard the agent answers it 2–3×. Each Slack message carries a unique `ts`; the channel drops any inbound `(channel, ts)` it has **already handled** — checked *before* acking or dispatching — within a window that comfortably covers a reconnect's redelivery (e.g. 10 minutes). Applies to both the `message` and `app_mention` handlers.
+
 ## Home tab
 
 The Slack app Home tab can serve as a personal dashboard for the owner. When the owner opens the Home tab, Slack fires an `app_home_opened` event; the channel handles it and publishes a Block Kit view via `views.publish`.
