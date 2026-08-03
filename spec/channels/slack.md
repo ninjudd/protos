@@ -39,7 +39,7 @@ See `architecture.md` → Storage → Attachments for the blob layout and event 
 
 ## Receipt ack
 
-Slack has no bot-visible typing indicator, so the channel posts a short placeholder message as soon as it accepts an inbound event, before dispatching to the router. This gives the user immediate feedback that the message was received and is being worked on; the agent's actual reply lands as a follow-up message (the ack stays in the channel — there's no edit-in-place or deletion).
+Slack has no bot-visible typing indicator, so the channel posts a short placeholder message as soon as it accepts an inbound event, before dispatching to the router. This gives the user immediate feedback that the message was received and is being worked on. On long-running turns the ack doubles as the in-place progress status (see Progress updates), edited silently as work proceeds; the agent's actual reply then lands as a follow-up message and the ack/status line is removed.
 
 - The placeholder is a randomly-selected playful gerund — "Thinking…", "Pondering…", "Noodling…", "Mulling…", "Brewing…", etc. — followed by `...`. The variation is deliberate (mirrors the Claude Code thinking indicator) and the verb is picked fresh on every inbound event. Keep the list playful but tasteful; one of the entries should always be the literal `Thinking`.
 - Post in the same channel, on the same thread (`thread_ts` from the inbound event for DM messages; the thread root — `event.thread_ts ?? event.ts` — for `app_mention`).
@@ -47,12 +47,14 @@ Slack has no bot-visible typing indicator, so the channel posts a short placehol
 
 ## Progress updates
 
-Slack turns can run long, and `send()` only posts the final reply. To keep the owner informed on slow turns, the Slack channel implements the optional `sendProgress(text)` from architecture.md → Progress updates (long-running turns).
+Slack turns can run long, and `send()` only posts the final reply. To keep the owner informed on slow turns, the Slack channel implements the optional `sendProgress(text)` from architecture.md → Progress updates (long-running turns). Rather than posting a new message per update — each of which would fire a mobile push — it edits a **single status message in place**:
 
-- Post each progress update as a **new message in the same thread** as the turn — reuse the `conversationId`'s channel and `thread_ts`, exactly like `send()`.
-- Style it as a **muted status line**, visually distinct from a real answer: collapse newlines to one line and wrap the text in italics (`_…_`), or post a `context` block. Strip stray `_` from the text first so it doesn't break the italics.
-- Progress posts are **best-effort**: on any Slack API error, log `[slack] progress post failed: <msg>` and return — never throw. A failed status update must not break the turn.
-- The receipt ack ("Thinking…") stays; the progress updates and the final reply all land as follow-up messages in the thread. There is no edit-in-place.
+- **One status message per turn, edited in place.** The turn's receipt ack (see Receipt ack) is the status message. Each `sendProgress` call **appends** its line to that message and re-renders it via `chat.update` — a silent edit that does *not* notify. Lines accumulate so earlier steps stay visible (terminal-style scrollback), capped at a sane maximum (e.g. 40 lines) to stay within Slack's message size.
+- **Style** each line as a muted status line: collapse newlines to one line and wrap in italics (`_…_`), stripping stray `_` first so it doesn't break the italics. One `_…_` per line, joined by newlines.
+- **Cleanup.** When the turn ends, `send()` posts the real reply as a new message (which notifies) and then **deletes the status message**, so the thread ends clean: question → answer. On `NO_REPLY`, the status message is deleted and nothing else is posted. Net: at most two notifications per turn (ack + reply), regardless of step count.
+- **`sendProgress` never creates a message** — it only edits the existing status message. If there is none (the ack failed to post, or the turn already finalized and cleaned up), it does nothing. Posting a fresh message here could orphan, since nothing would remain to delete it.
+- **Overlapping turns.** The ack is posted eagerly (before the router serializes the turn), so several acks can stack for one conversation when messages arrive while an earlier turn is still running. Track status messages as a **FIFO queue per conversation**: the router runs a conversation's turns in arrival order, so the head is always the running turn's status message — `sendProgress` edits the head, `send()` deletes and pops it. A single shared slot would let a later ack clobber the running turn's and make cleanup delete the wrong message.
+- **Best-effort**: on any Slack API error, log `[slack] progress post failed: <msg>` (or `[slack] status cleanup failed: <msg>` for the delete) and continue — never throw. A failed status update or cleanup must not break the turn.
 
 ## Markdown conversion
 
