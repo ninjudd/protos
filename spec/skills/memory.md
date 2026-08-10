@@ -53,3 +53,5 @@ git -C memory push
 (Or run the commands from inside `memory/` without `-C`.) Don't ask for confirmation; this is your durable state and yours to maintain.
 
 If a push fails (auth, network), surface it to the user briefly — don't silently drop the change. The next successful push will catch up.
+
+As a safety net, the router runs a fire-and-forget `git push` on `memory/` after every turn if there are unpushed commits. This catches the case where you commit but skip the push — it does **not** auto-commit, so you're still responsible for committing with a clear message.
