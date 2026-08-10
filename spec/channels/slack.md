@@ -23,7 +23,7 @@ slack:
 
 1. Create a Slack app at [api.slack.com](https://api.slack.com/apps)
 2. Enable Socket Mode (avoids needing a public URL)
-3. Add bot token scopes: `chat:write`, `channels:history`, `groups:history`, `im:history`, `app_mentions:read`
+3. Add bot token scopes: `chat:write`, `channels:history`, `groups:history`, `im:history`, `app_mentions:read`, `files:read` (`files:read` is required to download attachments via `file.url_private[_download]` — without it, Slack returns its login HTML page with HTTP 200 instead of the file bytes, which then poisons the agent's request to the model)
 4. Subscribe to events: `message.channels`, `message.groups`, `message.im`, `app_mention`
 5. Install the app to your workspace
 6. Install `@slack/bolt`
